@@ -72,7 +72,8 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
     }
     if roblox_username not in promotion_db:
         promotion_db[roblox_username] = []
-    promotion_db[roblox_username].append(promotion_entry)
+    promo_number = len(promotion_db[roblox_username]) + 1
+    promotion_db[roblox_username].append({"promo_number": promo_number, **promotion_entry})
     avatar_url = await get_roblox_avatar(roblox_username)
     embed = discord.Embed(
         title=f"🎉 Promotion for {roblox_username}",
@@ -84,6 +85,7 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
     embed.add_field(name="New Rank", value=new_rank, inline=True)
     embed.add_field(name="Promoted By", value=promoter, inline=False)
     embed.add_field(name="Date", value=current_date, inline=False)
+    embed.add_field(name="Promotion Number", value=promo_number, inline=False)
     await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="promotions", description="View promotion history for a Roblox user")
@@ -112,7 +114,7 @@ async def promotions(interaction: discord.Interaction, roblox_username: str):
         embed.set_thumbnail(url=avatar_url)
     for i, promo in enumerate(reversed(user_promotions[-5:])):
         embed.add_field(
-            name=f"Promotion #{len(user_promotions) - i}",
+            name=f"Promotion #{promo['promo_number']}",
             value=f"**From:** {promo['old_rank']}\n**To:** {promo['new_rank']}\n**By:** {promo['promoter']}\n**On:** {promo['date']}",
             inline=False
         )
@@ -170,6 +172,44 @@ async def demote(interaction: discord.Interaction, roblox_username: str, current
     embed.add_field(name="Date", value=current_date, inline=False)
 
     await interaction.followup.send(embed=embed)
+
+@bot.tree.command(name="delete_promo", description="Delete a specific promotion or a range of promotions for a Roblox user")
+@app_commands.describe(
+    roblox_username="The Roblox username of the user to delete promotions from",
+    promo_number="The promotion number or range (e.g., 1 or 1-3)"
+)
+async def delete_promo(interaction: discord.Interaction, roblox_username: str, promo_number: str):
+    await interaction.response.defer()
+
+    if roblox_username not in promotion_db or not promotion_db[roblox_username]:
+        await interaction.followup.send(f"No promotions found for {roblox_username}.")
+        return
+
+    try:
+        promo_range = promo_number.split("-")
+        if len(promo_range) == 1:
+            # Deleting a single promotion
+            promo_num = int(promo_range[0])
+            promotions_list = promotion_db[roblox_username]
+            promo_to_delete = next((promo for promo in promotions_list if promo['promo_number'] == promo_num), None)
+            if promo_to_delete:
+                promotion_db[roblox_username].remove(promo_to_delete)
+                await interaction.followup.send(f"Promotion {promo_num} for {roblox_username} has been deleted.")
+            else:
+                await interaction.followup.send(f"Promotion {promo_num} not found for {roblox_username}.")
+        elif len(promo_range) == 2:
+            # Deleting a range of promotions
+            start, end = map(int, promo_range)
+            promotions_list = promotion_db[roblox_username]
+            to_delete = [promo for promo in promotions_list if start <= promo['promo_number'] <= end]
+            if to_delete:
+                for promo in to_delete:
+                    promotion_db[roblox_username].remove(promo)
+                await interaction.followup.send(f"Promotions {start}-{end} for {roblox_username} have been deleted.")
+            else:
+                await interaction.followup.send(f"No promotions found in range {start}-{end} for {roblox_username}.")
+    except ValueError:
+        await interaction.followup.send("Invalid promotion number or range. Please enter a valid number or range (e.g., 1 or 1-3).")
 
 @bot.tree.command(name="demotions", description="View demotion history for a Roblox user")
 @app_commands.describe(
