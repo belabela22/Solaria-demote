@@ -125,7 +125,7 @@ async def demotions(interaction: discord.Interaction, roblox_username: str):
     for i, dem in enumerate(reversed(user_demotions[-5:])):
         embed.add_field(
             name=f"Demotion #{len(user_demotions) - i}",
-            value=f"**From:** {dem['current_rank']}\n**To:** {dem['demoted_rank']}\n**By:** {dem['demoter']}\n**On:** {dem['date']}",
+            value=f"**To:** {dem['current_rank']}\n**From:** {dem['demoted_rank']}\n**By:** {dem['demoter']}\n**On:** {dem['date']}",
             inline=False
         )
 
