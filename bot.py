@@ -25,7 +25,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Promotion and Demotion database
+# Promotion and Demotion databases
 promotion_db = {}
 demotion_db = {}
 
@@ -163,6 +163,77 @@ async def demote(interaction: discord.Interaction, roblox_username: str, current
     embed.add_field(name="Date", value=current_date, inline=False)
 
     await interaction.followup.send(embed=embed)
+
+@bot.tree.command(name="promotions", description="Show the promotion history of a Roblox user")
+@app_commands.describe(roblox_username="The Roblox username of the user to see promotion history")
+async def promotions(interaction: discord.Interaction, roblox_username: str = None):
+    if roblox_username is None:
+        # Show all promotions
+        if not promotion_db:
+            await interaction.response.send_message("No promotions found.")
+            return
+        embed = discord.Embed(
+            title="All Promotions",
+            color=discord.Color.blue()
+        )
+        for username, data in promotion_db.items():
+            embed.add_field(
+                name=f"Promotion for {username}",
+                value=f"From {data['current_rank']} to {data['new_rank']} on {data['date']}",
+                inline=False
+            )
+        await interaction.response.send_message(embed=embed)
+    else:
+        # Show a specific user's promotions
+        if roblox_username in promotion_db:
+            data = promotion_db[roblox_username]
+            embed = discord.Embed(
+                title=f"Promotion History for {roblox_username}",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="Previous Rank", value=data["current_rank"], inline=True)
+            embed.add_field(name="New Rank", value=data["new_rank"], inline=True)
+            embed.add_field(name="Date", value=data["date"], inline=False)
+            await interaction.response.send_message(embed=embed)
+        else:
+            await interaction.response.send_message(f"No promotion history found for {roblox_username}.")
+
+@bot.tree.command(name="demotions", description="Show the demotion history of a Roblox user")
+@app_commands.describe(roblox_username="The Roblox username of the user to see demotion history")
+async def demotions(interaction: discord.Interaction, roblox_username: str = None):
+    if roblox_username is None:
+        # Show all demotions
+        if not demotion_db:
+            await interaction.response.send_message("No demotions found.")
+            return
+        embed = discord.Embed(
+            title="All Demotions",
+            color=discord.Color.red()
+        )
+        for username, data in demotion_db.items():
+            for demotion in data:
+                embed.add_field(
+                    name=f"Demotion for {username}",
+                    value=f"From {demotion['current_rank']} to {demotion['demoted_rank']} on {demotion['date']}",
+                    inline=False
+                )
+        await interaction.response.send_message(embed=embed)
+    else:
+        # Show a specific user's demotions
+        if roblox_username in demotion_db:
+            embed = discord.Embed(
+                title=f"Demotion History for {roblox_username}",
+                color=discord.Color.red()
+            )
+            for demotion in demotion_db[roblox_username]:
+                embed.add_field(
+                    name=f"Demotion on {demotion['date']}",
+                    value=f"From {demotion['current_rank']} to {demotion['demoted_rank']}\nReason: {demotion['reason']}",
+                    inline=False
+                )
+            await interaction.response.send_message(embed=embed)
+        else:
+            await interaction.response.send_message(f"No demotion history found for {roblox_username}.")
 
 # Run the bot using environment variable
 bot.run(os.getenv("DISCORD_TOKEN"))
