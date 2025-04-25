@@ -6,15 +6,19 @@ import aiohttp
 import os
 import threading
 from flask import Flask
+from typing import Dict
 
-# Web server to keep bot alive on Render
+# Flask app for port binding (Render requirement)
 app = Flask('')
+
 @app.route('/')
 def home():
     return "Bot is running!"
+
 def run_web():
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
+
 threading.Thread(target=run_web).start()
 
 # Set up bot
@@ -22,164 +26,134 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Databases
+# Promotion database to track timestamps
 promotion_db = {}
-demotion_db = {}
-cooldown_tracker = {}
 
+# Cooldown settings for each category and rank transition
 cooldowns = {
-    ("EL3", "EL4"): 2,
-    ("EL4", "EL5"): 12,
-    ("EL6", "EL7"): 48,
-    ("EL7", "EL8"): 72,
-    ("EL8", "EL9"): 120
+    "medical": {
+        "El3 medical": {"El4 medical": 2 * 60 * 60},  # 2 hours
+        "El4 medical": {"El5 medical": 12 * 60 * 60},  # 12 hours
+        "El5 medical": {"El6 medical": 0},  # No cooldown
+        "El6 medical": {"El7 medical": 48 * 60 * 60},  # 48 hours
+        "El7 medical": {"El8 medical": 72 * 60 * 60},  # 72 hours
+        "El8 medical": {"El9 medical": 120 * 60 * 60},  # 120 hours
+    },
+    "receptionist": {
+        "El3 receptionist": {"El4 receptionist": 2 * 60 * 60},  # 2 hours
+        "El4 receptionist": {"El5 receptionist": 12 * 60 * 60},  # 12 hours
+        "El5 receptionist": {"El6 receptionist": 0},  # No cooldown
+        "El6 receptionist": {"El7 receptionist": 48 * 60 * 60},  # 48 hours
+        "El7 receptionist": {"El8 receptionist": 72 * 60 * 60},  # 72 hours
+        "El8 receptionist": {"El9 receptionist": 120 * 60 * 60},  # 120 hours
+    },
+    "nurse": {
+        "El3 nurse": {"El4 nurse": 2 * 60 * 60},  # 2 hours
+        "El4 nurse": {"El5 nurse": 12 * 60 * 60},  # 12 hours
+        "El5 nurse": {"El6 nurse": 0},  # No cooldown
+        "El6 nurse": {"El7 nurse": 48 * 60 * 60},  # 48 hours
+        "El7 nurse": {"El8 nurse": 72 * 60 * 60},  # 72 hours
+        "El8 nurse": {"El9 nurse": 120 * 60 * 60},  # 120 hours
+    },
+    "surgical": {
+        "El3 surgical": {"El4 surgical": 2 * 60 * 60},  # 2 hours
+        "El4 surgical": {"El5 surgical": 12 * 60 * 60},  # 12 hours
+        "El5 surgical": {"El6 surgical": 0},  # No cooldown
+        "El6 surgical": {"El7 surgical": 48 * 60 * 60},  # 48 hours
+        "El7 surgical": {"El8 surgical": 72 * 60 * 60},  # 72 hours
+        "El8 surgical": {"El9 surgical": 120 * 60 * 60},  # 120 hours
+    }
 }
 
-async def get_roblox_avatar(username: str):
+async def get_roblox_avatar(roblox_username: str) -> str:
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.roblox.com/users/get-by-username?username={username}") as resp:
-                data = await resp.json()
-                user_id = data.get("Id")
-                if user_id:
-                    async with session.get(f"https://thumbnails.roblox.com/v1/users/avatar?userIds={user_id}&size=420x420&format=Png") as thumb:
-                        thumb_data = await thumb.json()
-                        return thumb_data["data"][0]["imageUrl"]
+            async with session.get(f"https://api.roblox.com/users/get-by-username?username={roblox_username}") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    user_id = data.get("Id")
+                    if user_id:
+                        async with session.get(f"https://thumbnails.roblox.com/v1/users/avatar?userIds={user_id}&size=420x420&format=Png&isCircular=false") as thumb_resp:
+                            if thumb_resp.status == 200:
+                                thumb_data = await thumb_resp.json()
+                                return thumb_data["data"][0]["imageUrl"]
     except Exception as e:
-        print(f"Avatar fetch error: {e}")
+        print(f"Error fetching Roblox avatar: {e}")
     return None
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
     print(f"Logged in as {bot.user.name}")
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
 
+# Command for promoting
 @bot.tree.command(name="promote", description="Promote a Roblox user")
-@app_commands.describe(roblox_username="Roblox username", old_rank="Old rank", new_rank="New rank")
-async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: str, new_rank: str):
+@app_commands.describe(
+    roblox_username="The Roblox username of the user to promote",
+    old_rank="The user's current rank",
+    new_rank="The new rank after promotion",
+    category="The category of the user (medical, receptionist, nurse, surgical)"
+)
+async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: str, new_rank: str, category: str):
     await interaction.response.defer()
-    key = (old_rank.upper(), new_rank.upper())
-    now = datetime.datetime.now()
 
-    # Check cooldown tracker for this user and promotion
-    if roblox_username not in cooldown_tracker:
-        cooldown_tracker[roblox_username] = {}
+    # Ensure category is valid
+    if category not in cooldowns:
+        await interaction.followup.send("Invalid category. Use 'medical', 'receptionist', 'nurse', or 'surgical'.")
+        return
 
-    if key in cooldowns:
-        last_promotion_time = cooldown_tracker[roblox_username].get(key)
+    # Check cooldown
+    current_time = datetime.datetime.now().timestamp()  # Current time in seconds
+    if roblox_username in promotion_db and category in promotion_db[roblox_username]:
+        last_promotion_time = promotion_db[roblox_username][category].get(old_rank)
         if last_promotion_time:
-            time_diff = (now - last_promotion_time).total_seconds()
-            if time_diff < cooldowns[key] * 3600:  # In cooldown
-                remaining_time = cooldowns[key] * 3600 - time_diff
-                remaining_minutes = int(remaining_time / 60)
-                await interaction.followup.send(f"Promotion is in cooldown. Please wait {remaining_minutes} more minutes.")
+            time_since_last_promotion = current_time - last_promotion_time
+            cooldown_time = cooldowns[category].get(old_rank, {}).get(new_rank, 0)
+
+            # Check if cooldown is still active
+            if time_since_last_promotion < cooldown_time:
+                remaining_time = cooldown_time - time_since_last_promotion
+                remaining_time_minutes = remaining_time // 60
+                embed = discord.Embed(
+                    title=f"⚠️ Cooldown Active for {roblox_username}",
+                    description=f"Please wait {remaining_time_minutes} minutes before promoting again.",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed)
                 return
 
-    # If no cooldown or cooldown is over, proceed with promotion
-    cooldown_tracker[roblox_username][key] = now
+    # Proceed with promotion
+    current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    promoter = interaction.user.name
 
-    # Register promotion
-    date = now.strftime("%Y-%m-%d %H:%M:%S")
-    entry = {
-        "old_rank": old_rank,
-        "new_rank": new_rank,
-        "date": date,
-        "promoter": interaction.user.name
-    }
-    promotion_db.setdefault(roblox_username, []).append(entry)
+    # Log promotion time in the database
+    if roblox_username not in promotion_db:
+        promotion_db[roblox_username] = {}
 
-    avatar = await get_roblox_avatar(roblox_username)
-    embed = discord.Embed(title=f"Promotion for {roblox_username}", color=discord.Color.green())
-    if avatar: embed.set_thumbnail(url=avatar)
+    if category not in promotion_db[roblox_username]:
+        promotion_db[roblox_username][category] = {}
+
+    promotion_db[roblox_username][category][old_rank] = current_time
+
+    # Get user avatar
+    avatar_url = await get_roblox_avatar(roblox_username)
+    embed = discord.Embed(
+        title=f"🎉 Promotion for {roblox_username}",
+        color=discord.Color.green()
+    )
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
+
     embed.add_field(name="Previous Rank", value=old_rank, inline=True)
     embed.add_field(name="New Rank", value=new_rank, inline=True)
-    embed.add_field(name="Promoted By", value=interaction.user.name, inline=False)
-    embed.add_field(name="Date", value=date, inline=False)
+    embed.add_field(name="Promoted By", value=promoter, inline=False)
+    embed.add_field(name="Date", value=current_date, inline=False)
+
     await interaction.followup.send(embed=embed)
 
-@bot.tree.command(name="promotions", description="See a user's promotion history")
-@app_commands.describe(roblox_username="Roblox username")
-async def promotions(interaction: discord.Interaction, roblox_username: str):
-    await interaction.response.defer()
-    avatar = await get_roblox_avatar(roblox_username)
-    history = promotion_db.get(roblox_username, [])
-    if not history:
-        embed = discord.Embed(title="No promotions found.", color=discord.Color.red())
-        if avatar: embed.set_thumbnail(url=avatar)
-        await interaction.followup.send(embed=embed)
-        return
-    embed = discord.Embed(title=f"Promotion History for {roblox_username}", color=discord.Color.blue())
-    if avatar: embed.set_thumbnail(url=avatar)
-    for i, promo in enumerate(history[-5:], 1):
-        embed.add_field(
-            name=f"Promotion {len(history) - 5 + i}",
-            value=f"From {promo['old_rank']} to {promo['new_rank']}\nBy: {promo['promoter']}\nOn: {promo['date']}",
-            inline=False
-        )
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="demote", description="Demote a user and log the reason")
-@app_commands.describe(roblox_username="Roblox username", current_rank="Current rank", demoted_rank="Demoted to", reason="Reason for demotion")
-async def demote(interaction: discord.Interaction, roblox_username: str, current_rank: str, demoted_rank: str, reason: str):
-    await interaction.response.defer()
-    if roblox_username in promotion_db and promotion_db[roblox_username]:
-        promotion_db[roblox_username].pop()
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    entry = {
-        "current_rank": current_rank,
-        "demoted_rank": demoted_rank,
-        "reason": reason,
-        "demoter": interaction.user.name,
-        "date": now
-    }
-    demotion_db.setdefault(roblox_username, []).append(entry)
-    avatar = await get_roblox_avatar(roblox_username)
-    embed = discord.Embed(title=f"Demotion for {roblox_username}", color=discord.Color.red())
-    if avatar: embed.set_thumbnail(url=avatar)
-    embed.add_field(name="Previous Rank", value=current_rank, inline=True)
-    embed.add_field(name="New Rank", value=demoted_rank, inline=True)
-    embed.add_field(name="Reason", value=reason, inline=False)
-    embed.add_field(name="Demoted By", value=interaction.user.name, inline=False)
-    embed.add_field(name="Date", value=now, inline=False)
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="demotions", description="See a user's demotion history")
-@app_commands.describe(roblox_username="Roblox username")
-async def demotions(interaction: discord.Interaction, roblox_username: str):
-    await interaction.response.defer()
-    history = demotion_db.get(roblox_username, [])
-    avatar = await get_roblox_avatar(roblox_username)
-    if not history:
-        embed = discord.Embed(title="No demotions found.", color=discord.Color.red())
-        if avatar: embed.set_thumbnail(url=avatar)
-        await interaction.followup.send(embed=embed)
-        return
-    embed = discord.Embed(title=f"Demotion History for {roblox_username}", color=discord.Color.dark_red())
-    if avatar: embed.set_thumbnail(url=avatar)
-    for i, demotion in enumerate(history[-5:], 1):
-        embed.add_field(
-            name=f"Demotion {len(history) - 5 + i}",
-            value=f"From {demotion['current_rank']} to {demotion['demoted_rank']}\nReason: {demotion['reason']}\nBy: {demotion['demoter']}\nOn: {demotion['date']}",
-            inline=False
-        )
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="delete_promo", description="Delete promotions by number or range")
-@app_commands.describe(roblox_username="Roblox username", number="Number or range (e.g. 2 or 2-4)")
-async def delete_promo(interaction: discord.Interaction, roblox_username: str, number: str):
-    await interaction.response.defer()
-    if roblox_username not in promotion_db or not promotion_db[roblox_username]:
-        await interaction.followup.send("No promotions found.")
-        return
-    try:
-        if '-' in number:
-            start, end = map(int, number.split('-'))
-            del promotion_db[roblox_username][start-1:end]
-        else:
-            del promotion_db[roblox_username][int(number)-1]
-        await interaction.followup.send(f"Promotion(s) deleted successfully.")
-    except:
-        await interaction.followup.send("Invalid number or range provided.")
-
-# Run bot
+# Run the bot
 bot.run(os.getenv("DISCORD_TOKEN"))
