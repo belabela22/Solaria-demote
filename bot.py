@@ -134,6 +134,10 @@ async def promotions(interaction: discord.Interaction, roblox_username: str):
 async def demote(interaction: discord.Interaction, roblox_username: str, demoted_rank: str, current_rank: str):
     await interaction.response.defer()
     
+    # Remove the latest promotion before demotion
+    if roblox_username in promotion_db and promotion_db[roblox_username]:
+        promotion_db[roblox_username].pop()  # Removes the latest promotion entry
+
     current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     demoter = interaction.user.name
 
