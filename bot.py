@@ -7,6 +7,7 @@ import os
 import threading
 from flask import Flask
 from typing import List, Dict
+from urllib.parse import quote  # Use urllib.parse for URL encoding
 
 from datetime import timedelta
 
@@ -32,6 +33,7 @@ def home():
     return "Bot is running!"
 
 def run_web():
+    # Get the port from environment variable or set to a default port (e.g., 8080)
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
 
