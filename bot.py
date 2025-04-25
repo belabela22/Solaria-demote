@@ -60,15 +60,25 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
     await interaction.response.defer()
     key = (old_rank.upper(), new_rank.upper())
     now = datetime.datetime.now()
+
+    # Check cooldown tracker for this user and promotion
     if roblox_username not in cooldown_tracker:
         cooldown_tracker[roblox_username] = {}
+
     if key in cooldowns:
-        last = cooldown_tracker[roblox_username].get(key)
-        if last and (now - last).total_seconds() < cooldowns[key] * 3600:
-            remaining = int(cooldowns[key] * 3600 - (now - last).total_seconds()) // 60
-            await interaction.followup.send(f"Promotion is in cooldown. Try again in {remaining} minutes.")
-            return
+        last_promotion_time = cooldown_tracker[roblox_username].get(key)
+        if last_promotion_time:
+            time_diff = (now - last_promotion_time).total_seconds()
+            if time_diff < cooldowns[key] * 3600:  # In cooldown
+                remaining_time = cooldowns[key] * 3600 - time_diff
+                remaining_minutes = int(remaining_time / 60)
+                await interaction.followup.send(f"Promotion is in cooldown. Please wait {remaining_minutes} more minutes.")
+                return
+
+    # If no cooldown or cooldown is over, proceed with promotion
     cooldown_tracker[roblox_username][key] = now
+
+    # Register promotion
     date = now.strftime("%Y-%m-%d %H:%M:%S")
     entry = {
         "old_rank": old_rank,
@@ -77,6 +87,7 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
         "promoter": interaction.user.name
     }
     promotion_db.setdefault(roblox_username, []).append(entry)
+
     avatar = await get_roblox_avatar(roblox_username)
     embed = discord.Embed(title=f"Promotion for {roblox_username}", color=discord.Color.green())
     if avatar: embed.set_thumbnail(url=avatar)
