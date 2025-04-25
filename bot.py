@@ -1,121 +1,102 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
+from discord import app_commands
 import json
 import os
+import time
 from flask import Flask
 import threading
-import time
-
-# Initialize Flask app
-app = Flask(__name__)
-
-# Initialize the bot with the required intents
-intents = discord.Intents.default()
-bot = commands.Bot(command_prefix='/', intents=intents)
-
-# Port from the environment variable (Render will automatically set it)
-PORT = os.environ.get("PORT", 5000)
-
-# Cooldown data (stored in a JSON file)
-cooldown_file = "cooldown.json"
-
-# Load the cooldown data from the file (if exists)
-def load_cooldowns():
-    if os.path.exists(cooldown_file):
-        with open(cooldown_file, 'r') as f:
-            return json.load(f)
-    return {}
-
-# Save the cooldown data to the file
-def save_cooldowns(cooldowns):
-    with open(cooldown_file, 'w') as f:
-        json.dump(cooldowns, f, indent=4)
-
-# Cooldown check based on ranks
-cooldown_data = {
-    "El1": {"El2": 0},
-    "El2": {"El3": 2 * 3600},  # 2 hours
-    "El3": {"El4": 12 * 3600},  # 12 hours
-    "El4": {"El5": 0},
-    "El5": {"El6": 48 * 3600},  # 48 hours
-    "El6": {"El7": 72 * 3600},  # 72 hours
-    "El7": {"El8": 120 * 3600},  # 120 hours
-    "El8": {"El9": 0},
-}
+app = Flask('')
 
 @app.route('/')
-def index():
-    return 'Bot is running!'
+def home():
+    return "Bot is running!"
 
-# Function to run the Flask app in a separate thread
-def run():
-    app.run(host="0.0.0.0", port=PORT)
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
-# Start Flask server in a separate thread
-thread = threading.Thread(target=run)
-thread.start()
+# Start the web server in a new thread
+threading.Thread(target=run_web).start()
 
-# Check if the promotion is in cooldown
-def is_in_cooldown(user_id, old_rank, new_rank):
-    cooldowns = load_cooldowns()
-    if user_id not in cooldowns:
-        return False, 0  # No cooldown found
-    user_data = cooldowns[user_id]
-    if old_rank not in user_data or new_rank not in cooldown_data[old_rank]:
-        return False, 0
-    last_promotion_time = user_data.get(new_rank)
-    if last_promotion_time:
-        time_left = last_promotion_time + cooldown_data[old_rank][new_rank] - time.time()
-        return time_left > 0, time_left
-    return False, 0
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="/", intents=intents)
+cooldowns_file = "cooldowns.json"
 
-# Command to promote users
-@bot.command()
-async def promote(ctx, roblox_user: str, old_rank: str, new_rank: str):
-    user_id = str(ctx.author.id)  # Using author ID to track the cooldowns
-    in_cooldown, time_left = is_in_cooldown(user_id, old_rank, new_rank)
-    
-    if in_cooldown:
-        # Send a message saying the promotion is in cooldown
-        await ctx.send(f"Promotion from {old_rank} to {new_rank} is in cooldown. Time left: {time_left:.2f} seconds.")
-        return
+# Cooldown durations in seconds
+cooldown_mapping = {
+    "El3": {"El4": 2 * 3600},      # 2 hours
+    "El4": {"El5": 12 * 3600},     # 12 hours
+    "El5": {"El6": 0},
+    "El6": {"El7": 48 * 3600},     # 2 days
+    "El7": {"El8": 72 * 3600},     # 3 days
+    "El8": {"El9": 120 * 3600}     # 5 days
+}
 
-    # Register the promotion time
-    cooldowns = load_cooldowns()
-    if user_id not in cooldowns:
-        cooldowns[user_id] = {}
-    cooldowns[user_id][new_rank] = time.time()
-    save_cooldowns(cooldowns)
+# Load cooldown data
+if os.path.exists(cooldowns_file):
+    with open(cooldowns_file, "r") as f:
+        cooldowns = json.load(f)
+else:
+    cooldowns = {}
 
-    # Send a success message
-    await ctx.send(f"{roblox_user} has been promoted from {old_rank} to {new_rank}!")
+def save_cooldowns():
+    with open(cooldowns_file, "w") as f:
+        json.dump(cooldowns, f, indent=4)
 
-# Command to show all promotions
-@bot.command()
-async def promotions(ctx):
-    cooldowns = load_cooldowns()
-    embed = discord.Embed(title="Promotion History", color=discord.Color.blue())
-    for user_id, user_data in cooldowns.items():
-        for rank, time_promotion in user_data.items():
-            embed.add_field(name=f"User {user_id}", value=f"Rank: {rank}, Promoted At: {time_promotion}", inline=False)
-    await ctx.send(embed=embed)
+def get_seconds_remaining(last_time, cooldown_duration):
+    remaining = last_time + cooldown_duration - int(time.time())
+    return remaining if remaining > 0 else 0
 
-# Command to demote users
-@bot.command()
-async def demote(ctx, roblox_user: str, old_rank: str, new_rank: str, reason: str):
-    user_id = str(ctx.author.id)
-    cooldowns = load_cooldowns()
-    
-    if user_id in cooldowns:
-        user_data = cooldowns[user_id]
-        if new_rank in user_data:
-            del user_data[new_rank]  # Delete the demoted rank
-            save_cooldowns(cooldowns)
-            await ctx.send(f"{roblox_user} has been demoted from {old_rank} to {new_rank}. Reason: {reason}")
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    print(f"{bot.user} is online!")
+
+@bot.tree.command(name="promote", description="Promote a Roblox user")
+@app_commands.describe(
+    roblox_username="Username to promote",
+    old_rank="Current rank (e.g. El3 medical)",
+    new_rank="New rank (e.g. El4 medical)"
+)
+async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: str, new_rank: str):
+    user_key = roblox_username.lower()
+    rank_from = old_rank.split()[0]
+    rank_to = new_rank.split()[0]
+
+    # Determine cooldown (if any)
+    cooldown_time = cooldown_mapping.get(rank_from, {}).get(rank_to)
+
+    if cooldown_time is not None:
+        user_cooldown = cooldowns.get(user_key, {})
+        key = f"{rank_from}_{rank_to}"
+        last_time = user_cooldown.get(key, 0)
+
+        seconds_remaining = get_seconds_remaining(last_time, cooldown_time)
+
+        if seconds_remaining > 0:
+            hours = seconds_remaining // 3600
+            minutes = (seconds_remaining % 3600) // 60
+            embed = discord.Embed(
+                title="Cooldown Active",
+                description=f"**{roblox_username}** can't be promoted from **{old_rank}** to **{new_rank}** yet.",
+                color=discord.Color.red()
+            )
+            embed.add_field(name="Time Left", value=f"{hours}h {minutes}m", inline=False)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
         else:
-            await ctx.send(f"No promotion record found for {roblox_user} in the rank {new_rank}.")
-    else:
-        await ctx.send(f"No promotion record found for {roblox_user}.")
+            # Update cooldown
+            user_cooldown[key] = int(time.time())
+            cooldowns[user_key] = user_cooldown
+            save_cooldowns()
 
+    # Proceed with promotion (log it or show embed)
+    embed = discord.Embed(
+        title="Promotion Successful",
+        description=f"**{roblox_username}** has been promoted from **{old_rank}** to **{new_rank}**.",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed)
 # Run the bot
 bot.run('YOUR_BOT_TOKEN')
