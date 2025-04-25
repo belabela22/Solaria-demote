@@ -214,5 +214,42 @@ async def demotions(interaction: discord.Interaction, roblox_username: str = Non
         for username, data in demotion_db.items():
             for demotion in data:
                 embed.add_field(
+                    @bot.tree.command(name="demotions", description="Show the demotion history of a Roblox user")
+@app_commands.describe(roblox_username="The Roblox username of the user to see demotion history")
+async def demotions(interaction: discord.Interaction, roblox_username: str = None):
+    if roblox_username is None:
+        # Show all demotions
+        if not demotion_db:
+            await interaction.response.send_message("No demotions found.")
+            return
+        embed = discord.Embed(
+            title="All Demotions",
+            color=discord.Color.red()
+        )
+        for username, data in demotion_db.items():
+            for demotion in data:
+                embed.add_field(
                     name=f"Demotion for {username}",
-                    value=f"From {demotion['current_rank']}
+                    value=f"From {demotion['current_rank']} to {demotion['demoted_rank']} on {demotion['date']}",
+                    inline=False
+                )
+        await interaction.response.send_message(embed=embed)
+    else:
+        # Show a specific user's demotions
+        if roblox_username in demotion_db:
+            data = demotion_db[roblox_username]
+            embed = discord.Embed(
+                title=f"Demotion History for {roblox_username}",
+                color=discord.Color.red()
+            )
+            for demotion in data:
+                embed.add_field(name="Previous Rank", value=demotion["current_rank"], inline=True)
+                embed.add_field(name="New Rank", value=demotion["demoted_rank"], inline=True)
+                embed.add_field(name="Demoted By", value=demotion["demoter"], inline=False)
+                embed.add_field(name="Reason", value=demotion["reason"], inline=False)
+                embed.add_field(name="Date", value=demotion["date"], inline=False)
+            await interaction.response.send_message(embed=embed)
+        else:
+            await interaction.response.send_message(f"No demotion history found for {roblox_username}.")
+            # Run the bot using environment variable
+bot.run(os.getenv("DISCORD_TOKEN"))
