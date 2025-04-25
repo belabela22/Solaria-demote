@@ -196,7 +196,7 @@ async def demotions(interaction: discord.Interaction, roblox_username: str):
     embed = discord.Embed(
         title=f"📉 Demotion History for {roblox_username}",
         description=f"Total demotions: {len(entries)}",
-        color=discord.Color.dark red()
+        color=discord.Color.dark_red()
     )
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
