@@ -7,7 +7,7 @@ import os
 import threading
 from flask import Flask
 
-# Flask app for Render port binding
+# Web server for Render hosting
 app = Flask('')
 
 @app.route('/')
@@ -20,16 +20,16 @@ def run_web():
 
 threading.Thread(target=run_web).start()
 
-# Bot setup
+# Set up bot
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Databases
-promotion_db = {}  # {roblox_username: [promotion entries]}
-demotion_db = {}   # {roblox_username: [demotion entries]}
+# In-memory databases
+promotion_db = {}  # {roblox_username: [promotion_entry]}
+demotion_db = {}   # {roblox_username: [demotion_entry]}
 
-# Roblox avatar fetcher
+# Fetch Roblox avatar
 async def get_roblox_avatar(roblox_username: str) -> str:
     try:
         async with aiohttp.ClientSession() as session:
@@ -63,16 +63,21 @@ async def on_ready():
     new_rank="The new rank after promotion"
 )
 async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: str, new_rank: str):
-    await interaction.response.defer()
+    await interaction.response.defer(thinking=True)
+
     current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     promoter = interaction.user.name
-    entry = {
+    promotion_entry = {
         "old_rank": old_rank,
         "new_rank": new_rank,
         "date": current_date,
         "promoter": promoter
     }
-    promotion_db.setdefault(roblox_username, []).append(entry)
+
+    if roblox_username not in promotion_db:
+        promotion_db[roblox_username] = []
+    promotion_db[roblox_username].append(promotion_entry)
+
     avatar_url = await get_roblox_avatar(roblox_username)
 
     embed = discord.Embed(
@@ -94,7 +99,8 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
     roblox_username="The Roblox username to check promotion history for"
 )
 async def promotions(interaction: discord.Interaction, roblox_username: str):
-    await interaction.response.defer()
+    await interaction.response.defer(thinking=True)
+
     avatar_url = await get_roblox_avatar(roblox_username)
 
     if roblox_username not in promotion_db or not promotion_db[roblox_username]:
@@ -131,20 +137,25 @@ async def promotions(interaction: discord.Interaction, roblox_username: str):
 @bot.tree.command(name="demote", description="Demote a Roblox user")
 @app_commands.describe(
     roblox_username="The Roblox username of the user to demote",
-    demoted_rank="The new lower rank after demotion",
-    current_rank="The user's current rank before demotion"
+    current_rank="The user's current rank",
+    demoted_rank="The new lower rank after demotion"
 )
-async def demote(interaction: discord.Interaction, roblox_username: str, demoted_rank: str, current_rank: str):
-    await interaction.response.defer()
+async def demote(interaction: discord.Interaction, roblox_username: str, current_rank: str, demoted_rank: str):
+    await interaction.response.defer(thinking=True)
+
     current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     demoter = interaction.user.name
-    entry = {
+    demotion_entry = {
         "current_rank": current_rank,
         "demoted_rank": demoted_rank,
         "date": current_date,
         "demoter": demoter
     }
-    demotion_db.setdefault(roblox_username, []).append(entry)
+
+    if roblox_username not in demotion_db:
+        demotion_db[roblox_username] = []
+    demotion_db[roblox_username].append(demotion_entry)
+
     avatar_url = await get_roblox_avatar(roblox_username)
 
     embed = discord.Embed(
@@ -153,6 +164,7 @@ async def demote(interaction: discord.Interaction, roblox_username: str, demoted
     )
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
+
     embed.add_field(name="Previous Rank", value=current_rank, inline=True)
     embed.add_field(name="New Rank", value=demoted_rank, inline=True)
     embed.add_field(name="Demoted By", value=demoter, inline=False)
@@ -166,7 +178,8 @@ async def demote(interaction: discord.Interaction, roblox_username: str, demoted
     roblox_username="The Roblox username to check demotion history for"
 )
 async def demotions(interaction: discord.Interaction, roblox_username: str):
-    await interaction.response.defer()
+    await interaction.response.defer(thinking=True)
+
     avatar_url = await get_roblox_avatar(roblox_username)
 
     if roblox_username not in demotion_db or not demotion_db[roblox_username]:
@@ -199,5 +212,5 @@ async def demotions(interaction: discord.Interaction, roblox_username: str):
 
     await interaction.followup.send(embed=embed)
 
-# Start the bot
+# Run the bot
 bot.run(os.getenv("DISCORD_TOKEN"))
