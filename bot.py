@@ -85,8 +85,8 @@ async def demote(interaction: discord.Interaction, roblox_username: str, demoted
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
 
-    embed.add_field(name="Previous Rank", value=current_rank, inline=True)
-    embed.add_field(name="New Rank", value=demoted_rank, inline=True)
+    embed.add_field(name="Current Rank", value=current_rank, inline=True)
+    embed.add_field(name="Demoted Rank", value=demoted_rank, inline=True)
     embed.add_field(name="Demoted By", value=demoter, inline=False)
     embed.add_field(name="Date", value=current_date, inline=False)
 
