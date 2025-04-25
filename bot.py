@@ -6,7 +6,6 @@ import aiohttp
 import os
 import threading
 from flask import Flask
-import asyncio
 
 # Flask app for port binding (Render requirement)
 app = Flask('')
@@ -26,7 +25,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Promotion and demotion databases
+# Promotion and Demotion database
 promotion_db = {}
 demotion_db = {}
 
@@ -50,14 +49,10 @@ async def get_roblox_avatar(roblox_username: str) -> str:
 async def on_ready():
     print(f"Logged in as {bot.user.name}")
     try:
-        # Force sync all commands on bot startup
-        await bot.tree.sync()
-        print(f"Commands synced successfully.")
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands")
     except Exception as e:
         print(f"Error syncing commands: {e}")
-    
-    # Optional: Make sure commands are synced properly even after the bot is ready
-    await asyncio.sleep(1)
 
 @bot.tree.command(name="promote", description="Promote a Roblox user")
 @app_commands.describe(
@@ -128,23 +123,29 @@ async def promotions(interaction: discord.Interaction, roblox_username: str):
 @bot.tree.command(name="demote", description="Demote a Roblox user")
 @app_commands.describe(
     roblox_username="The Roblox username of the user to demote",
+    current_rank="The user's current rank before demotion",
     demoted_rank="The new lower rank after demotion",
-    current_rank="The user's current rank before demotion"
+    reason="The reason for the demotion"
 )
-async def demote(interaction: discord.Interaction, roblox_username: str, demoted_rank: str, current_rank: str):
+async def demote(interaction: discord.Interaction, roblox_username: str, current_rank: str, demoted_rank: str, reason: str):
     await interaction.response.defer()
-
-    # Remove the last promotion entry for the user before demotion
-    if roblox_username in promotion_db and promotion_db[roblox_username]:
-        promotion_db[roblox_username].pop(-1)  # Removes the last promotion entry (last item in the list)
-
+    
+    # Ensure the reason is provided
+    if not reason:
+        await interaction.followup.send("You must provide a reason for the demotion.")
+        return
+    
     current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     demoter = interaction.user.name
 
-    # Log the demotion entry
+    # Check if there is a promotion history for the user and remove the last one
+    if roblox_username in promotion_db and promotion_db[roblox_username]:
+        promotion_db[roblox_username].pop()  # Remove the last promotion
+
     demotion_entry = {
         "current_rank": current_rank,
         "demoted_rank": demoted_rank,
+        "reason": reason,
         "date": current_date,
         "demoter": demoter
     }
@@ -153,7 +154,6 @@ async def demote(interaction: discord.Interaction, roblox_username: str, demoted
         demotion_db[roblox_username] = []
     demotion_db[roblox_username].append(demotion_entry)
 
-    # Get the Roblox avatar
     avatar_url = await get_roblox_avatar(roblox_username)
 
     embed = discord.Embed(
@@ -166,6 +166,7 @@ async def demote(interaction: discord.Interaction, roblox_username: str, demoted
     embed.add_field(name="Current Rank", value=current_rank, inline=True)
     embed.add_field(name="Demoted Rank", value=demoted_rank, inline=True)
     embed.add_field(name="Demoted By", value=demoter, inline=False)
+    embed.add_field(name="Reason", value=reason, inline=False)
     embed.add_field(name="Date", value=current_date, inline=False)
 
     await interaction.followup.send(embed=embed)
@@ -203,7 +204,7 @@ async def demotions(interaction: discord.Interaction, roblox_username: str):
     for i, dem in enumerate(reversed(user_demotions[-5:])):
         embed.add_field(
             name=f"Demotion #{len(user_demotions) - i}",
-            value=f"**To:** {dem['current_rank']}\n**From:** {dem['demoted_rank']}\n**By:** {dem['demoter']}\n**On:** {dem['date']}",
+            value=f"**To:** {dem['current_rank']}\n**From:** {dem['demoted_rank']}\n**Reason:** {dem['reason']}\n**By:** {dem['demoter']}\n**On:** {dem['date']}",
             inline=False
         )
 
