@@ -87,7 +87,8 @@ async def promote(interaction: discord.Interaction, roblox_username: str, curren
 
                 if time_diff < required_cooldown:
                     remaining_time = required_cooldown - time_diff
-                    await interaction.followup.send(f"{roblox_username} cannot be promoted yet. Please wait {remaining_time}.")
+                    remaining_time_str = str(remaining_time).split('.')[0]  # Remove microseconds
+                    await interaction.followup.send(f"{roblox_username} cannot be promoted yet. Please wait {remaining_time_str} before promoting again.")
                     return
 
         # Proceed with promotion and update promotion time
@@ -214,26 +215,4 @@ async def demotions(interaction: discord.Interaction, roblox_username: str = Non
             for demotion in data:
                 embed.add_field(
                     name=f"Demotion for {username}",
-                    value=f"From {demotion['current_rank']} to {demotion['demoted_rank']} on {demotion['date']}",
-                    inline=False
-                )
-        await interaction.response.send_message(embed=embed)
-    else:
-        # Show a specific user's demotions
-        if roblox_username in demotion_db:
-            embed = discord.Embed(
-                title=f"Demotion History for {roblox_username}",
-                color=discord.Color.red()
-            )
-            for demotion in demotion_db[roblox_username]:
-                embed.add_field(
-                    name=f"Demotion on {demotion['date']}",
-                    value=f"From {demotion['current_rank']} to {demotion['demoted_rank']}\nReason: {demotion['reason']}",
-                    inline=False
-                )
-            await interaction.response.send_message(embed=embed)
-        else:
-            await interaction.response.send_message(f"No demotion history found for {roblox_username}.")
-
-# Run the bot using environment variable
-bot.run(os.getenv("DISCORD_TOKEN"))
+                    value=f"From {demotion['current_rank']}
