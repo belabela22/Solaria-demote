@@ -133,14 +133,15 @@ async def promotions(interaction: discord.Interaction, roblox_username: str):
 )
 async def demote(interaction: discord.Interaction, roblox_username: str, demoted_rank: str, current_rank: str):
     await interaction.response.defer()
-    
-    # Remove the latest promotion before demotion
+
+    # Remove the last promotion entry for the user before demotion
     if roblox_username in promotion_db and promotion_db[roblox_username]:
-        promotion_db[roblox_username].pop()  # Removes the latest promotion entry
+        promotion_db[roblox_username].pop(-1)  # Removes the last promotion entry (last item in the list)
 
     current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     demoter = interaction.user.name
 
+    # Log the demotion entry
     demotion_entry = {
         "current_rank": current_rank,
         "demoted_rank": demoted_rank,
@@ -152,6 +153,7 @@ async def demote(interaction: discord.Interaction, roblox_username: str, demoted
         demotion_db[roblox_username] = []
     demotion_db[roblox_username].append(demotion_entry)
 
+    # Get the Roblox avatar
     avatar_url = await get_roblox_avatar(roblox_username)
 
     embed = discord.Embed(
