@@ -1,158 +1,121 @@
 import discord
-import os
+from discord.ext import commands, tasks
 import json
-from discord.ext import commands
-from datetime import datetime, timedelta
 import os
 from flask import Flask
+import threading
+import time
 
+# Initialize Flask app
 app = Flask(__name__)
 
-@app.route('/')
-def hello_world():
-    return 'Hello, World!'
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Default to port 5000 if not specified
-    app.run(host="0.0.0.0", port=port)
-
-# Load or initialize promotion and demotion data
-promo_file = "promotions.json"
-demotion_file = "demotions.json"
-
-if not os.path.exists(promo_file):
-    with open(promo_file, "w") as f:
-        json.dump({}, f)
-
-if not os.path.exists(demotion_file):
-    with open(demotion_file, "w") as f:
-        json.dump({}, f)
-
+# Initialize the bot with the required intents
 intents = discord.Intents.default()
-intents.message_content = True  # Enable the necessary intents
+bot = commands.Bot(command_prefix='/', intents=intents)
 
-bot = commands.Bot(command_prefix="/", intents=intents)
+# Port from the environment variable (Render will automatically set it)
+PORT = os.environ.get("PORT", 5000)
 
-# Global cooldowns for each promotion rank
-cooldowns = {
-    "El1 to El2": timedelta(hours=2),
-    "El2 to El3": timedelta(hours=12),
-    "El3 to El4": timedelta(hours=24),
-    "El4 to El5": timedelta(hours=48),
-    "El5 to El6": timedelta(days=1),
-    "El6 to El7": timedelta(days=2),
-    "El7 to El8": timedelta(days=3),
-    "El8 to El9": timedelta(days=5),
+# Cooldown data (stored in a JSON file)
+cooldown_file = "cooldown.json"
+
+# Load the cooldown data from the file (if exists)
+def load_cooldowns():
+    if os.path.exists(cooldown_file):
+        with open(cooldown_file, 'r') as f:
+            return json.load(f)
+    return {}
+
+# Save the cooldown data to the file
+def save_cooldowns(cooldowns):
+    with open(cooldown_file, 'w') as f:
+        json.dump(cooldowns, f, indent=4)
+
+# Cooldown check based on ranks
+cooldown_data = {
+    "El1": {"El2": 0},
+    "El2": {"El3": 2 * 3600},  # 2 hours
+    "El3": {"El4": 12 * 3600},  # 12 hours
+    "El4": {"El5": 0},
+    "El5": {"El6": 48 * 3600},  # 48 hours
+    "El6": {"El7": 72 * 3600},  # 72 hours
+    "El7": {"El8": 120 * 3600},  # 120 hours
+    "El8": {"El9": 0},
 }
 
-# Helper function to load data from the file
-def load_data(filename):
-    with open(filename, "r") as f:
-        return json.load(f)
+@app.route('/')
+def index():
+    return 'Bot is running!'
 
-# Helper function to save data to the file
-def save_data(filename, data):
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=4)
+# Function to run the Flask app in a separate thread
+def run():
+    app.run(host="0.0.0.0", port=PORT)
 
-# Promote Command
+# Start Flask server in a separate thread
+thread = threading.Thread(target=run)
+thread.start()
+
+# Check if the promotion is in cooldown
+def is_in_cooldown(user_id, old_rank, new_rank):
+    cooldowns = load_cooldowns()
+    if user_id not in cooldowns:
+        return False, 0  # No cooldown found
+    user_data = cooldowns[user_id]
+    if old_rank not in user_data or new_rank not in cooldown_data[old_rank]:
+        return False, 0
+    last_promotion_time = user_data.get(new_rank)
+    if last_promotion_time:
+        time_left = last_promotion_time + cooldown_data[old_rank][new_rank] - time.time()
+        return time_left > 0, time_left
+    return False, 0
+
+# Command to promote users
 @bot.command()
-async def promote(ctx, roblox_username: str, old_rank: str, new_rank: str):
-    user_data = load_data(promo_file)
+async def promote(ctx, roblox_user: str, old_rank: str, new_rank: str):
+    user_id = str(ctx.author.id)  # Using author ID to track the cooldowns
+    in_cooldown, time_left = is_in_cooldown(user_id, old_rank, new_rank)
+    
+    if in_cooldown:
+        # Send a message saying the promotion is in cooldown
+        await ctx.send(f"Promotion from {old_rank} to {new_rank} is in cooldown. Time left: {time_left:.2f} seconds.")
+        return
 
-    # Create unique promotion identifier
-    promotion_key = f"{roblox_username}-{old_rank}-{new_rank}"
+    # Register the promotion time
+    cooldowns = load_cooldowns()
+    if user_id not in cooldowns:
+        cooldowns[user_id] = {}
+    cooldowns[user_id][new_rank] = time.time()
+    save_cooldowns(cooldowns)
 
-    if promotion_key in user_data:
-        last_promotion_time = datetime.strptime(user_data[promotion_key], "%Y-%m-%d %H:%M:%S")
-        remaining_time = last_promotion_time + cooldowns.get(f"{old_rank} to {new_rank}", timedelta()) - datetime.now()
-        
-        if remaining_time > timedelta(0):
-            await ctx.send(f"Promotion is in cooldown. Time remaining: {str(remaining_time)}")
-            return
+    # Send a success message
+    await ctx.send(f"{roblox_user} has been promoted from {old_rank} to {new_rank}!")
 
-    # Update last promotion time and save data
-    user_data[promotion_key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    save_data(promo_file, user_data)
-
-    await ctx.send(f"{roblox_username} has been promoted from {old_rank} to {new_rank}.")
-
-# Demote Command
-@bot.command()
-async def demote(ctx, roblox_username: str, current_rank: str, demoted_rank: str, reason: str):
-    demotion_data = load_data(demotion_file)
-
-    demotion_key = f"{roblox_username}-{current_rank}-{demoted_rank}"
-
-    # Log the demotion
-    demotion_data[demotion_key] = {
-        "roblox_username": roblox_username,
-        "current_rank": current_rank,
-        "demoted_rank": demoted_rank,
-        "reason": reason,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    save_data(demotion_file, demotion_data)
-
-    await ctx.send(f"{roblox_username} has been demoted from {current_rank} to {demoted_rank}. Reason: {reason}")
-
-# View Promotions History Command
+# Command to show all promotions
 @bot.command()
 async def promotions(ctx):
-    user_data = load_data(promo_file)
-
-    embed = discord.Embed(title="Promotion History", description="Listing all promotions.", color=discord.Color.green())
-    for key, value in user_data.items():
-        roblox_username, old_rank, new_rank = key.split('-')
-        embed.add_field(name=f"{roblox_username}: {old_rank} -> {new_rank}", value=f"Last promoted: {value}", inline=False)
-
+    cooldowns = load_cooldowns()
+    embed = discord.Embed(title="Promotion History", color=discord.Color.blue())
+    for user_id, user_data in cooldowns.items():
+        for rank, time_promotion in user_data.items():
+            embed.add_field(name=f"User {user_id}", value=f"Rank: {rank}, Promoted At: {time_promotion}", inline=False)
     await ctx.send(embed=embed)
 
-# View Demotions History Command
+# Command to demote users
 @bot.command()
-async def demotions(ctx):
-    demotion_data = load_data(demotion_file)
-
-    embed = discord.Embed(title="Demotion History", description="Listing all demotions.", color=discord.Color.red())
-    for key, details in demotion_data.items():
-        embed.add_field(
-            name=f"{details['roblox_username']}: {details['current_rank']} -> {details['demoted_rank']}",
-            value=f"Reason: {details['reason']} - Time: {details['timestamp']}",
-            inline=False,
-        )
-
-    await ctx.send(embed=embed)
-
-# Delete Promotion Command
-@bot.command()
-async def delete_promo(ctx, promo_number: int):
-    user_data = load_data(promo_file)
-
-    # Find promotion by number
-    promotion_keys = list(user_data.keys())
-    if 0 < promo_number <= len(promotion_keys):
-        promotion_key = promotion_keys[promo_number - 1]
-        del user_data[promotion_key]
-        save_data(promo_file, user_data)
-        await ctx.send(f"Promotion {promo_number} has been deleted.")
+async def demote(ctx, roblox_user: str, old_rank: str, new_rank: str, reason: str):
+    user_id = str(ctx.author.id)
+    cooldowns = load_cooldowns()
+    
+    if user_id in cooldowns:
+        user_data = cooldowns[user_id]
+        if new_rank in user_data:
+            del user_data[new_rank]  # Delete the demoted rank
+            save_cooldowns(cooldowns)
+            await ctx.send(f"{roblox_user} has been demoted from {old_rank} to {new_rank}. Reason: {reason}")
+        else:
+            await ctx.send(f"No promotion record found for {roblox_user} in the rank {new_rank}.")
     else:
-        await ctx.send("Invalid promotion number.")
+        await ctx.send(f"No promotion record found for {roblox_user}.")
 
-# Delete Demotion Command
-@bot.command()
-async def delete_demotion(ctx, demotion_number: int):
-    demotion_data = load_data(demotion_file)
-
-    # Find demotion by number
-    demotion_keys = list(demotion_data.keys())
-    if 0 < demotion_number <= len(demotion_keys):
-        demotion_key = demotion_keys[demotion_number - 1]
-        del demotion_data[demotion_key]
-        save_data(demotion_file, demotion_data)
-        await ctx.send(f"Demotion {demotion_number} has been deleted.")
-    else:
-        await ctx.send("Invalid demotion number.")
-
-# Start the bot with the token
-TOKEN = os.getenv("DISCORD_TOKEN")
-bot.run(TOKEN)
+# Run the bot
+bot.run('YOUR_BOT_TOKEN')
