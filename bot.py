@@ -99,10 +99,15 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
         elapsed = current_time - last_promotion_time
         if elapsed < cooldown:
             remaining = cooldown - elapsed
-            await interaction.followup.send(
-                f"**Not eligible yet.**\nTime remaining before next promotion: `{str(remaining).split('.')[0]}`",
-                ephemeral=True
+
+            # Create an embed to show the remaining time in an orange box
+            embed = discord.Embed(
+                title="⏳ Promotion Cooldown",
+                description=f"**Time remaining before next promotion:**\n`{str(remaining).split('.')[0]}`",
+                color=discord.Color.orange()
             )
+
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
     # Track the promotion time
@@ -144,6 +149,5 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
         embed.set_footer(text="User is at the highest rank (El9). No further promotions available.")
 
     await interaction.followup.send(embed=embed)
-
 # Run the bot using environment variable
 bot.run(os.getenv("DISCORD_TOKEN"))
