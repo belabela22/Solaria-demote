@@ -6,8 +6,9 @@ import aiohttp
 import os
 import threading
 from flask import Flask
+import asyncio
 
-# Web server for Render hosting
+# Flask app for port binding (Render requirement)
 app = Flask('')
 
 @app.route('/')
@@ -25,11 +26,10 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# In-memory databases
-promotion_db = {}  # {roblox_username: [promotion_entry]}
-demotion_db = {}   # {roblox_username: [demotion_entry]}
+# Promotion and demotion databases
+promotion_db = {}
+demotion_db = {}
 
-# Fetch Roblox avatar
 async def get_roblox_avatar(roblox_username: str) -> str:
     try:
         async with aiohttp.ClientSession() as session:
@@ -50,12 +50,15 @@ async def get_roblox_avatar(roblox_username: str) -> str:
 async def on_ready():
     print(f"Logged in as {bot.user.name}")
     try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands")
+        # Force sync all commands on bot startup
+        await bot.tree.sync()
+        print(f"Commands synced successfully.")
     except Exception as e:
         print(f"Error syncing commands: {e}")
+    
+    # Optional: Make sure commands are synced properly even after the bot is ready
+    await asyncio.sleep(1)
 
-# /promote command
 @bot.tree.command(name="promote", description="Promote a Roblox user")
 @app_commands.describe(
     roblox_username="The Roblox username of the user to promote",
@@ -63,8 +66,7 @@ async def on_ready():
     new_rank="The new rank after promotion"
 )
 async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: str, new_rank: str):
-    await interaction.response.defer(thinking=True)
-
+    await interaction.response.defer()
     current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     promoter = interaction.user.name
     promotion_entry = {
@@ -73,13 +75,10 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
         "date": current_date,
         "promoter": promoter
     }
-
     if roblox_username not in promotion_db:
         promotion_db[roblox_username] = []
     promotion_db[roblox_username].append(promotion_entry)
-
     avatar_url = await get_roblox_avatar(roblox_username)
-
     embed = discord.Embed(
         title=f"🎉 Promotion for {roblox_username}",
         color=discord.Color.green()
@@ -90,19 +89,15 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
     embed.add_field(name="New Rank", value=new_rank, inline=True)
     embed.add_field(name="Promoted By", value=promoter, inline=False)
     embed.add_field(name="Date", value=current_date, inline=False)
-
     await interaction.followup.send(embed=embed)
 
-# /promotions command
 @bot.tree.command(name="promotions", description="View promotion history for a Roblox user")
 @app_commands.describe(
     roblox_username="The Roblox username to check promotion history for"
 )
 async def promotions(interaction: discord.Interaction, roblox_username: str):
-    await interaction.response.defer(thinking=True)
-
+    await interaction.response.defer()
     avatar_url = await get_roblox_avatar(roblox_username)
-
     if roblox_username not in promotion_db or not promotion_db[roblox_username]:
         embed = discord.Embed(
             title=f"No promotions found for {roblox_username}",
@@ -112,39 +107,36 @@ async def promotions(interaction: discord.Interaction, roblox_username: str):
             embed.set_thumbnail(url=avatar_url)
         await interaction.followup.send(embed=embed)
         return
-
-    entries = promotion_db[roblox_username]
+    user_promotions = promotion_db[roblox_username]
     embed = discord.Embed(
         title=f"📜 Promotion History for {roblox_username}",
-        description=f"Total promotions: {len(entries)}",
+        description=f"Total promotions: {len(user_promotions)}",
         color=discord.Color.blue()
     )
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
-
-    for i, promo in enumerate(reversed(entries[-5:])):
+    for i, promo in enumerate(reversed(user_promotions[-5:])):
         embed.add_field(
-            name=f"Promotion #{len(entries) - i}",
+            name=f"Promotion #{len(user_promotions) - i}",
             value=f"**From:** {promo['old_rank']}\n**To:** {promo['new_rank']}\n**By:** {promo['promoter']}\n**On:** {promo['date']}",
             inline=False
         )
-    if len(entries) > 5:
-        embed.set_footer(text=f"Showing latest 5 of {len(entries)} promotions")
-
+    if len(user_promotions) > 5:
+        embed.set_footer(text=f"Showing latest 5 of {len(user_promotions)} promotions")
     await interaction.followup.send(embed=embed)
 
-# /demote command
 @bot.tree.command(name="demote", description="Demote a Roblox user")
 @app_commands.describe(
     roblox_username="The Roblox username of the user to demote",
-    current_rank="The user's current rank",
-    demoted_rank="The new lower rank after demotion"
+    demoted_rank="The new lower rank after demotion",
+    current_rank="The user's current rank before demotion"
 )
-async def demote(interaction: discord.Interaction, roblox_username: str, current_rank: str, demoted_rank: str):
-    await interaction.response.defer(thinking=True)
-
+async def demote(interaction: discord.Interaction, roblox_username: str, demoted_rank: str, current_rank: str):
+    await interaction.response.defer()
+    
     current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     demoter = interaction.user.name
+
     demotion_entry = {
         "current_rank": current_rank,
         "demoted_rank": demoted_rank,
@@ -172,13 +164,12 @@ async def demote(interaction: discord.Interaction, roblox_username: str, current
 
     await interaction.followup.send(embed=embed)
 
-# /demotions command
 @bot.tree.command(name="demotions", description="View demotion history for a Roblox user")
 @app_commands.describe(
     roblox_username="The Roblox username to check demotion history for"
 )
 async def demotions(interaction: discord.Interaction, roblox_username: str):
-    await interaction.response.defer(thinking=True)
+    await interaction.response.defer()
 
     avatar_url = await get_roblox_avatar(roblox_username)
 
@@ -192,25 +183,28 @@ async def demotions(interaction: discord.Interaction, roblox_username: str):
         await interaction.followup.send(embed=embed)
         return
 
-    entries = demotion_db[roblox_username]
+    user_demotions = demotion_db[roblox_username]
+
     embed = discord.Embed(
         title=f"📉 Demotion History for {roblox_username}",
-        description=f"Total demotions: {len(entries)}",
-        color=discord.Color.dark_red()
+        description=f"Total demotions: {len(user_demotions)}",
+        color=discord.Color.blue()
     )
+
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
 
-    for i, dem in enumerate(reversed(entries[-5:])):
+    for i, dem in enumerate(reversed(user_demotions[-5:])):
         embed.add_field(
-            name=f"Demotion #{len(entries) - i}",
+            name=f"Demotion #{len(user_demotions) - i}",
             value=f"**To:** {dem['current_rank']}\n**From:** {dem['demoted_rank']}\n**By:** {dem['demoter']}\n**On:** {dem['date']}",
             inline=False
         )
-    if len(entries) > 5:
-        embed.set_footer(text=f"Showing latest 5 of {len(entries)} demotions")
+
+    if len(user_demotions) > 5:
+        embed.set_footer(text=f"Showing latest 5 of {len(user_demotions)} demotions")
 
     await interaction.followup.send(embed=embed)
 
-# Run the bot
+# Run the bot using environment variable
 bot.run(os.getenv("DISCORD_TOKEN"))
