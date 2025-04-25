@@ -29,6 +29,16 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 promotion_db = {}
 demotion_db = {}
 
+# Define the cooldowns for each role transition
+cooldowns = {
+    ("El3", "El4"): datetime.timedelta(hours=2),
+    ("El4", "El5"): datetime.timedelta(hours=12),
+    ("El5", "El6"): datetime.timedelta(hours=0),
+    ("El6", "El7"): datetime.timedelta(days=2),
+    ("El7", "El8"): datetime.timedelta(days=3),
+    ("El8", "El9"): datetime.timedelta(days=5),
+}
+
 async def get_roblox_avatar(roblox_username: str) -> str:
     try:
         async with aiohttp.ClientSession() as session:
@@ -57,70 +67,51 @@ async def on_ready():
 @bot.tree.command(name="promote", description="Promote a Roblox user")
 @app_commands.describe(
     roblox_username="The Roblox username of the user to promote",
-    old_rank="The user's current rank",
+    current_rank="The user's current rank",
     new_rank="The new rank after promotion"
 )
-async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: str, new_rank: str):
+async def promote(interaction: discord.Interaction, roblox_username: str, current_rank: str, new_rank: str):
     await interaction.response.defer()
-    current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    promoter = interaction.user.name
-    promotion_entry = {
-        "old_rank": old_rank,
-        "new_rank": new_rank,
-        "date": current_date,
-        "promoter": promoter
-    }
-    if roblox_username not in promotion_db:
-        promotion_db[roblox_username] = []
-    promo_number = len(promotion_db[roblox_username]) + 1
-    promotion_db[roblox_username].append({"promo_number": promo_number, **promotion_entry})
-    avatar_url = await get_roblox_avatar(roblox_username)
-    embed = discord.Embed(
-        title=f"🎉 Promotion for {roblox_username}",
-        color=discord.Color.green()
-    )
-    if avatar_url:
-        embed.set_thumbnail(url=avatar_url)
-    embed.add_field(name="Previous Rank", value=old_rank, inline=True)
-    embed.add_field(name="New Rank", value=new_rank, inline=True)
-    embed.add_field(name="Promoted By", value=promoter, inline=False)
-    embed.add_field(name="Date", value=current_date, inline=False)
-    embed.add_field(name="Promotion Number", value=promo_number, inline=False)
-    await interaction.followup.send(embed=embed)
 
-@bot.tree.command(name="promotions", description="View promotion history for a Roblox user")
-@app_commands.describe(
-    roblox_username="The Roblox username to check promotion history for"
-)
-async def promotions(interaction: discord.Interaction, roblox_username: str):
-    await interaction.response.defer()
-    avatar_url = await get_roblox_avatar(roblox_username)
-    if roblox_username not in promotion_db or not promotion_db[roblox_username]:
+    # Check if the promotion transition exists in cooldowns
+    if (current_rank, new_rank) in cooldowns:
+        required_cooldown = cooldowns[(current_rank, new_rank)]
+        now = datetime.datetime.now()
+
+        # Check if the user has been promoted before and if the cooldown has expired
+        if roblox_username in promotion_db:
+            last_promotion = promotion_db[roblox_username].get('last_promotion', None)
+            if last_promotion:
+                last_promotion_time = datetime.datetime.strptime(last_promotion, "%Y-%m-%d %H:%M:%S")
+                time_diff = now - last_promotion_time
+
+                if time_diff < required_cooldown:
+                    remaining_time = required_cooldown - time_diff
+                    await interaction.followup.send(f"{roblox_username} cannot be promoted yet. Please wait {remaining_time}.")
+                    return
+
+        # Proceed with promotion and update promotion time
+        promotion_entry = {
+            "current_rank": current_rank,
+            "new_rank": new_rank,
+            "date": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "last_promotion": now.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        promotion_db[roblox_username] = promotion_entry
+
+        # Send success message with avatar
+        avatar_url = await get_roblox_avatar(roblox_username)
         embed = discord.Embed(
-            title=f"No promotions found for {roblox_username}",
-            color=discord.Color.red()
+            title=f"🎉 Promotion for {roblox_username}",
+            color=discord.Color.green()
         )
         if avatar_url:
             embed.set_thumbnail(url=avatar_url)
+        embed.add_field(name="Previous Rank", value=current_rank, inline=True)
+        embed.add_field(name="New Rank", value=new_rank, inline=True)
+        embed.add_field(name="Date", value=now.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
         await interaction.followup.send(embed=embed)
-        return
-    user_promotions = promotion_db[roblox_username]
-    embed = discord.Embed(
-        title=f"📜 Promotion History for {roblox_username}",
-        description=f"Total promotions: {len(user_promotions)}",
-        color=discord.Color.blue()
-    )
-    if avatar_url:
-        embed.set_thumbnail(url=avatar_url)
-    for i, promo in enumerate(reversed(user_promotions[-5:])):
-        embed.add_field(
-            name=f"Promotion #{promo['promo_number']}",
-            value=f"**From:** {promo['old_rank']}\n**To:** {promo['new_rank']}\n**By:** {promo['promoter']}\n**On:** {promo['date']}",
-            inline=False
-        )
-    if len(user_promotions) > 5:
-        embed.set_footer(text=f"Showing latest 5 of {len(user_promotions)} promotions")
-    await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="demote", description="Demote a Roblox user")
 @app_commands.describe(
@@ -141,7 +132,7 @@ async def demote(interaction: discord.Interaction, roblox_username: str, current
     demoter = interaction.user.name
 
     # Check if there is a promotion history for the user and remove the last one
-    if roblox_username in promotion_db and promotion_db[roblox_username]:
+    if roblox_username in promotion_db and promotion_db.get(roblox_username):
         promotion_db[roblox_username].pop()  # Remove the last promotion
 
     demotion_entry = {
@@ -165,91 +156,11 @@ async def demote(interaction: discord.Interaction, roblox_username: str, current
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
 
-    embed.add_field(name="Current Rank", value=current_rank, inline=True)
-    embed.add_field(name="Demoted Rank", value=demoted_rank, inline=True)
+    embed.add_field(name="Previous Rank", value=current_rank, inline=True)
+    embed.add_field(name="New Rank", value=demoted_rank, inline=True)
     embed.add_field(name="Demoted By", value=demoter, inline=False)
     embed.add_field(name="Reason", value=reason, inline=False)
     embed.add_field(name="Date", value=current_date, inline=False)
-
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="delete_promo", description="Delete a specific promotion or a range of promotions for a Roblox user")
-@app_commands.describe(
-    roblox_username="The Roblox username of the user to delete promotions from",
-    promo_number="The promotion number or range (e.g., 1 or 1-3)"
-)
-async def delete_promo(interaction: discord.Interaction, roblox_username: str, promo_number: str):
-    await interaction.response.defer()
-
-    if roblox_username not in promotion_db or not promotion_db[roblox_username]:
-        await interaction.followup.send(f"No promotions found for {roblox_username}.")
-        return
-
-    try:
-        promo_range = promo_number.split("-")
-        if len(promo_range) == 1:
-            # Deleting a single promotion
-            promo_num = int(promo_range[0])
-            promotions_list = promotion_db[roblox_username]
-            promo_to_delete = next((promo for promo in promotions_list if promo['promo_number'] == promo_num), None)
-            if promo_to_delete:
-                promotion_db[roblox_username].remove(promo_to_delete)
-                await interaction.followup.send(f"Promotion {promo_num} for {roblox_username} has been deleted.")
-            else:
-                await interaction.followup.send(f"Promotion {promo_num} not found for {roblox_username}.")
-        elif len(promo_range) == 2:
-            # Deleting a range of promotions
-            start, end = map(int, promo_range)
-            promotions_list = promotion_db[roblox_username]
-            to_delete = [promo for promo in promotions_list if start <= promo['promo_number'] <= end]
-            if to_delete:
-                for promo in to_delete:
-                    promotion_db[roblox_username].remove(promo)
-                await interaction.followup.send(f"Promotions {start}-{end} for {roblox_username} have been deleted.")
-            else:
-                await interaction.followup.send(f"No promotions found in range {start}-{end} for {roblox_username}.")
-    except ValueError:
-        await interaction.followup.send("Invalid promotion number or range. Please enter a valid number or range (e.g., 1 or 1-3).")
-
-@bot.tree.command(name="demotions", description="View demotion history for a Roblox user")
-@app_commands.describe(
-    roblox_username="The Roblox username to check demotion history for"
-)
-async def demotions(interaction: discord.Interaction, roblox_username: str):
-    await interaction.response.defer()
-
-    avatar_url = await get_roblox_avatar(roblox_username)
-
-    if roblox_username not in demotion_db or not demotion_db[roblox_username]:
-        embed = discord.Embed(
-            title=f"No demotions found for {roblox_username}",
-            color=discord.Color.red()
-        )
-        if avatar_url:
-            embed.set_thumbnail(url=avatar_url)
-        await interaction.followup.send(embed=embed)
-        return
-
-    user_demotions = demotion_db[roblox_username]
-
-    embed = discord.Embed(
-        title=f"📉 Demotion History for {roblox_username}",
-        description=f"Total demotions: {len(user_demotions)}",
-        color=discord.Color.blue()
-    )
-
-    if avatar_url:
-        embed.set_thumbnail(url=avatar_url)
-
-    for i, dem in enumerate(reversed(user_demotions[-5:])):
-        embed.add_field(
-            name=f"Demotion #{len(user_demotions) - i}",
-            value=f"**To:** {dem['current_rank']}\n**From:** {dem['demoted_rank']}\n**Reason:** {dem['reason']}\n**By:** {dem['demoter']}\n**On:** {dem['date']}",
-            inline=False
-        )
-
-    if len(user_demotions) > 5:
-        embed.set_footer(text=f"Showing latest 5 of {len(user_demotions)} demotions")
 
     await interaction.followup.send(embed=embed)
 
