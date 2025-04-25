@@ -3,6 +3,18 @@ import os
 import json
 from discord.ext import commands
 from datetime import datetime, timedelta
+import os
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello_world():
+    return 'Hello, World!'
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))  # Default to port 5000 if not specified
+    app.run(host="0.0.0.0", port=port)
 
 # Load or initialize promotion and demotion data
 promo_file = "promotions.json"
