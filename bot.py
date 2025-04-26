@@ -5,8 +5,8 @@ import datetime
 import aiohttp
 import os
 import threading
-import json
 from flask import Flask
+from typing import Dict
 
 # Flask app for Render hosting
 app = Flask('')
@@ -27,31 +27,8 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Promotion database and cooldown tracker
-PROMOTION_DB_FILE = "promotion_db.json"
-LAST_PROMOTION_FILE = "last_promotion_time.json"
-
-promotion_db = {}
-last_promotion_time = {}
-
-# Load promotion history from file if exists
-if os.path.exists(PROMOTION_DB_FILE):
-    with open(PROMOTION_DB_FILE, "r") as f:
-        promotion_db = json.load(f)
-
-# Load cooldown tracking from file if exists
-if os.path.exists(LAST_PROMOTION_FILE):
-    with open(LAST_PROMOTION_FILE, "r") as f:
-        last_promotion_time = json.load(f)
-
-# Cooldowns based on the new rank the user is promoted into
-promotion_cooldowns = {
-    "EL3": 2,   # 2 hours after becoming EL3
-    "EL4": 12,  # 12 hours after becoming EL4
-    "EL5": 0,   # No wait after EL5
-    "EL6": 48,  # 48 hours after becoming EL6
-    "EL7": 72,  # 72 hours after becoming EL7
-    "EL8": 120, # 120 hours after becoming EL8
-}
+promotion_db: Dict[str, list] = {}
+promotion_cooldowns: Dict[str, datetime.datetime] = {}
 
 async def get_roblox_avatar(roblox_username: str) -> str:
     try:
@@ -78,79 +55,57 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
-@bot.tree.command(name="promote", description="Promote a Roblox user")
-@app_commands.describe(
-    roblox_username="The Roblox username of the user to promote",
-    old_rank="The user's current rank",
-    new_rank="The new rank after promotion"
-)
-async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: str, new_rank: str):
-    await interaction.response.defer()
-    current_date = datetime.datetime.now()
-    promoter = interaction.user.name
+# Create the /promote command
+@bot.tree.command(name="promote", description="Promote a Roblox user.")
+@app_commands.describe(roblox_username="Roblox username", old_rank="Old rank", new_rank="New rank", cooldown="Cooldown duration (e.g., 2h, 12h, 2d)")
+async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: str, new_rank: str, cooldown: str):
+    now = datetime.datetime.utcnow()
 
-    # Define the cooldown times
-    cooldowns = {
-        ("El3", "El4"): 2,
-        ("El4", "El5"): 12,
-        ("El5", "El6"): 0,
-        ("El6", "El7"): 48,
-        ("El7", "El8"): 72,
-        ("El8", "El9"): 120
-    }
+    # Check if user is still under cooldown
+    if roblox_username in promotion_cooldowns:
+        cooldown_until = promotion_cooldowns[roblox_username]
+        if now < cooldown_until:
+            remaining = cooldown_until - now
+            await interaction.response.send_message(f"❗ {roblox_username} is still under promotion cooldown! Please wait {str(remaining).split('.')[0]}.", ephemeral=True)
+            return
 
-    # Check cooldown
-    if roblox_username not in promotion_db:
-        promotion_db[roblox_username] = []
+    # Parse cooldown input
+    duration = None
+    if cooldown.endswith('h'):
+        hours = int(cooldown[:-1])
+        duration = datetime.timedelta(hours=hours)
+    elif cooldown.endswith('d'):
+        days = int(cooldown[:-1])
+        duration = datetime.timedelta(days=days)
+    elif cooldown.lower() == "no":
+        duration = None
+    else:
+        await interaction.response.send_message("⚠️ Invalid cooldown format! Use '2h' for hours or '2d' for days, or 'no' for instant.", ephemeral=True)
+        return
 
-    last_promotions = promotion_db[roblox_username]
-    if last_promotions:
-        last_promo = last_promotions[-1]
-        last_time = datetime.datetime.strptime(last_promo["date"], "%Y-%m-%d %H:%M:%S")
-        last_new_rank = last_promo["new_rank"]
+    # Set cooldown if applicable
+    if duration:
+        promotion_cooldowns[roblox_username] = now + duration
 
-        cooldown_hours = cooldowns.get((last_new_rank, new_rank))
-        if cooldown_hours is not None:
-            elapsed = (current_date - last_time).total_seconds()
-            if elapsed < cooldown_hours * 3600:
-                remaining = cooldown_hours * 3600 - elapsed
-                hours_left = int(remaining // 3600)
-                minutes_left = int((remaining % 3600) // 60)
-                next_allowed_time = (last_time + datetime.timedelta(hours=cooldown_hours)).strftime("%Y-%m-%d %H:%M")
-
-                embed = discord.Embed(
-                    title="⏳ Promotion Cooldown",
-                    description=(
-                        f"**{roblox_username}** was recently promoted.\n"
-                        f"Please wait **{hours_left}h {minutes_left}m**.\n\n"
-                        f"**Next promotion allowed:** `{next_allowed_time}`"
-                    ),
-                    color=discord.Color.orange()
-                )
-                await interaction.followup.send(embed=embed)
-                return
-
-    # Promotion success
-    promotion_entry = {
+    # Save promotion info
+    avatar_url = await get_roblox_avatar(roblox_username)
+    promotion_db.setdefault(roblox_username, []).append({
         "old_rank": old_rank,
         "new_rank": new_rank,
-        "date": current_date.strftime("%Y-%m-%d %H:%M:%S"),
-        "promoter": promoter
-    }
-    promotion_db[roblox_username].append(promotion_entry)
+        "promoted_at": now.isoformat(),
+        "cooldown_until": (now + duration).isoformat() if duration else "None"
+    })
 
-    avatar_url = await get_roblox_avatar(roblox_username)
-    embed = discord.Embed(
-        title=f"🎉 Promotion for {roblox_username}",
-        color=discord.Color.green()
-    )
+    # Send confirmation embed
+    embed = discord.Embed(title="Promotion Logged!", color=discord.Color.green())
+    embed.add_field(name="Roblox Username", value=roblox_username, inline=False)
+    embed.add_field(name="Old Rank", value=old_rank, inline=True)
+    embed.add_field(name="New Rank", value=new_rank, inline=True)
+    embed.add_field(name="Cooldown", value=cooldown, inline=True)
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
-    embed.add_field(name="Previous Rank", value=old_rank, inline=True)
-    embed.add_field(name="New Rank", value=new_rank, inline=True)
-    embed.add_field(name="Promoted By", value=promoter, inline=False)
-    embed.add_field(name="Date", value=current_date.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
-    await interaction.followup.send(embed=embed)
 
-# Run the bot
+    await interaction.response.send_message(embed=embed)
+
+# Run bot
 bot.run(os.getenv("DISCORD_TOKEN"))
