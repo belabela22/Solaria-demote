@@ -98,22 +98,22 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
         last_rank = last_data["rank"]
         last_time = datetime.datetime.fromisoformat(last_data["timestamp"])
 
-       remaining = cooldown_hours * 3600 - elapsed
-hours_left = int(remaining // 3600)
-minutes_left = int((remaining % 3600) // 60)
-next_allowed_time = (last_time + datetime.timedelta(hours=cooldown_hours)).strftime("%Y-%m-%d %H:%M")
+              remaining = cooldown_hours * 3600 - elapsed
+        hours_left = int(remaining // 3600)
+        minutes_left = int((remaining % 3600) // 60)
+        next_allowed_time = (last_time + datetime.timedelta(hours=cooldown_hours)).strftime("%Y-%m-%d %H:%M")
 
-embed = discord.Embed(
-    title="⏳ Promotion Cooldown",
-    description=(
-        f"**{roblox_username}** was recently promoted.\n"
-        f"Please wait **{hours_left}h {minutes_left}m**.\n\n"
-        f"**Next promotion allowed:** `{next_allowed_time}`"
-    ),
-    color=discord.Color.orange()
-)
-await interaction.followup.send(embed=embed)
-return
+        embed = discord.Embed(
+            title="⏳ Promotion Cooldown",
+            description=(
+                f"**{roblox_username}** was recently promoted.\n"
+                f"Please wait **{hours_left}h {minutes_left}m**.\n\n"
+                f"**Next promotion allowed:** `{next_allowed_time}`"
+            ),
+            color=discord.Color.orange()
+        )
+        await interaction.followup.send(embed=embed)
+        return
 
     # No cooldown active, allow promotion
     current_date = now.strftime("%Y-%m-%d %H:%M:%S")
