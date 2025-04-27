@@ -55,9 +55,8 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
-# Create the /promote command
 @bot.tree.command(name="promote", description="Promote a Roblox user.")
-@app_commands.describe(roblox_username="Roblox username", old_rank="Old rank", new_rank="New rank", cooldown="Cooldown duration (e.g., 2h, 12h, 2d)")
+@app_commands.describe(roblox_username="Roblox username", old_rank="Old rank", new_rank="New rank", cooldown="Cooldown (e.g., 2h, 12h, 2d, no)")
 async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: str, new_rank: str, cooldown: str):
     now = datetime.datetime.utcnow()
 
@@ -65,8 +64,11 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
     if roblox_username in promotion_cooldowns:
         cooldown_until = promotion_cooldowns[roblox_username]
         if now < cooldown_until:
-            remaining = cooldown_until - now
-            await interaction.response.send_message(f"❗ {roblox_username} is still under promotion cooldown! Please wait {str(remaining).split('.')[0]}.", ephemeral=True)
+            cooldown_unix = int(cooldown_until.timestamp())
+            await interaction.response.send_message(
+                f"❗ {roblox_username} is still under promotion cooldown! You can promote again <t:{cooldown_unix}:R>.",
+                ephemeral=True
+            )
             return
 
     # Parse cooldown input
@@ -80,12 +82,14 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
     elif cooldown.lower() == "no":
         duration = None
     else:
-        await interaction.response.send_message("⚠️ Invalid cooldown format! Use '2h' for hours or '2d' for days, or 'no' for instant.", ephemeral=True)
+        await interaction.response.send_message("⚠️ Invalid cooldown format! Use '2h', '2d', or 'no'.", ephemeral=True)
         return
 
     # Set cooldown if applicable
+    cooldown_until = None
     if duration:
-        promotion_cooldowns[roblox_username] = now + duration
+        cooldown_until = now + duration
+        promotion_cooldowns[roblox_username] = cooldown_until
 
     # Save promotion info
     avatar_url = await get_roblox_avatar(roblox_username)
@@ -93,15 +97,19 @@ async def promote(interaction: discord.Interaction, roblox_username: str, old_ra
         "old_rank": old_rank,
         "new_rank": new_rank,
         "promoted_at": now.isoformat(),
-        "cooldown_until": (now + duration).isoformat() if duration else "None"
+        "cooldown_until": cooldown_until.isoformat() if cooldown_until else "None"
     })
 
-    # Send confirmation embed
+    # Create embed message
     embed = discord.Embed(title="Promotion Logged!", color=discord.Color.green())
     embed.add_field(name="Roblox Username", value=roblox_username, inline=False)
     embed.add_field(name="Old Rank", value=old_rank, inline=True)
     embed.add_field(name="New Rank", value=new_rank, inline=True)
-    embed.add_field(name="Cooldown", value=cooldown, inline=True)
+    if cooldown_until:
+        cooldown_unix = int(cooldown_until.timestamp())
+        embed.add_field(name="Cooldown Ends", value=f"<t:{cooldown_unix}:R>", inline=False)
+    else:
+        embed.add_field(name="Cooldown Ends", value="No cooldown (instant promotion)", inline=False)
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
 
