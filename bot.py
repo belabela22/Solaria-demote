@@ -242,4 +242,4 @@ async def help_command(interaction: discord.Interaction):
 
 
 # Run the bot
-bot.run(os.getenv("DISCORD_TOKEN")
+bot.run(os.getenv("DISCORD_TOKEN"))
