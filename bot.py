@@ -53,7 +53,7 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
-# Rank choices
+# Rank choices (grouped by categories)
 rank_choices = [
     # Public Relations
     discord.app_commands.Choice(name="EL1 PR", value="EL1 PR"),
@@ -65,7 +65,7 @@ rank_choices = [
     discord.app_commands.Choice(name="EL7 PR", value="EL7 PR"),
     discord.app_commands.Choice(name="EL8 PR", value="EL8 PR"),
     discord.app_commands.Choice(name="EL9 PR", value="EL9 PR"),
-    
+
     # Medical
     discord.app_commands.Choice(name="EL1 Medical", value="EL1 Medical"),
     discord.app_commands.Choice(name="EL2 Medical", value="EL2 Medical"),
@@ -76,7 +76,7 @@ rank_choices = [
     discord.app_commands.Choice(name="EL7 Medical", value="EL7 Medical"),
     discord.app_commands.Choice(name="EL8 Medical", value="EL8 Medical"),
     discord.app_commands.Choice(name="EL9 Medical", value="EL9 Medical"),
-    
+
     # Surgical
     discord.app_commands.Choice(name="EL1 Surgical", value="EL1 Surgical"),
     discord.app_commands.Choice(name="EL2 Surgical", value="EL2 Surgical"),
@@ -87,7 +87,7 @@ rank_choices = [
     discord.app_commands.Choice(name="EL7 Surgical", value="EL7 Surgical"),
     discord.app_commands.Choice(name="EL8 Surgical", value="EL8 Surgical"),
     discord.app_commands.Choice(name="EL9 Surgical", value="EL9 Surgical"),
-    
+
     # Nursing
     discord.app_commands.Choice(name="EL1 Nursing", value="EL1 Nursing"),
     discord.app_commands.Choice(name="EL2 Nursing", value="EL2 Nursing"),
@@ -98,7 +98,7 @@ rank_choices = [
     discord.app_commands.Choice(name="EL7 Nursing", value="EL7 Nursing"),
     discord.app_commands.Choice(name="EL8 Nursing", value="EL8 Nursing"),
     discord.app_commands.Choice(name="EL9 Nursing", value="EL9 Nursing"),
-    
+
     # Paramedic
     discord.app_commands.Choice(name="EL1 Paramedic", value="EL1 Paramedic"),
     discord.app_commands.Choice(name="EL2 Paramedic", value="EL2 Paramedic"),
