@@ -2,12 +2,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import os
-import threading
-import datetime
 import json
+import datetime
+import threading
 from flask import Flask
 
-# ——— Flask keep-alive for Render ———
+# --- Flask setup for Render ---
 app = Flask('')
 
 @app.route('/')
@@ -20,244 +20,190 @@ def run_web():
 
 threading.Thread(target=run_web).start()
 
-# ——— File paths ———
+# --- Files ---
 PROMOTION_FILE = "promotions.json"
-DEMOTION_FILE  = "demotions.json"
-COOLDOWN_FILE  = "cooldowns.json"
+DEMOTION_FILE = "demotions.json"
+COOLDOWN_FILE = "cooldowns.json"
 
-# ——— JSON helpers ———
-def load_json(path, default):
-    if not os.path.exists(path):
+def load_json(filename, default):
+    if not os.path.exists(filename):
         return default
-    with open(path, "r") as f:
+    with open(filename, "r") as f:
         return json.load(f)
 
-def save_json(path, data):
-    with open(path, "w") as f:
+def save_json(filename, data):
+    with open(filename, "w") as f:
         json.dump(data, f, indent=4)
 
-# ——— Load databases ———
-promotions_db = load_json(PROMOTION_FILE, {})   # { username: [ { promotion_number, old_rank, new_rank, time }, ... ] }
-demotions_db  = load_json(DEMOTION_FILE,  {})   # { username: [ { promotion_number, current_rank, demoted_rank, reason, time }, ... ] }
-cooldowns_db  = load_json(COOLDOWN_FILE,  {})    # { username: timestamp_int }
+promotions_db = load_json(PROMOTION_FILE, {})
+demotions_db = load_json(DEMOTION_FILE, {})
+cooldowns_db = load_json(COOLDOWN_FILE, {})
 
-# ——— Discord bot setup ———
+def save_all():
+    save_json(PROMOTION_FILE, promotions_db)
+    save_json(DEMOTION_FILE, demotions_db)
+    save_json(COOLDOWN_FILE, cooldowns_db)
+
+# --- Discord Bot ---
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ——— Rank list for autocomplete ———
-CATEGORIES = {
-    "PR":       range(1,10),
-    "Medical":  range(1,10),
-    "Surgical": range(1,10),
-    "Nursing":  range(1,10),
-    "Paramedic":range(1,10)
-}
-RANK_CHOICES = [
-    app_commands.Choice(name=f"{cat} - EL{i} {cat}", value=f"EL{i} {cat}")
-    for cat, nums in CATEGORIES.items() for i in nums
+# --- Rank Choices ---
+ranks = [
+    "EL1 PR", "EL2 PR", "EL3 PR", "EL4 PR", "EL5 PR", "EL6 PR", "EL7 PR", "EL8 PR", "EL9 PR",
+    "EL1 Medical", "EL2 Medical", "EL3 Medical", "EL4 Medical", "EL5 Medical", "EL6 Medical", "EL7 Medical", "EL8 Medical", "EL9 Medical",
+    "EL1 Surgical", "EL2 Surgical", "EL3 Surgical", "EL4 Surgical", "EL5 Surgical", "EL6 Surgical", "EL7 Surgical", "EL8 Surgical", "EL9 Surgical",
+    "EL1 Nursing", "EL2 Nursing", "EL3 Nursing", "EL4 Nursing", "EL5 Nursing", "EL6 Nursing", "EL7 Nursing", "EL8 Nursing", "EL9 Nursing",
+    "EL1 Paramedic", "EL2 Paramedic", "EL3 Paramedic", "EL4 Paramedic", "EL5 Paramedic", "EL6 Paramedic", "EL7 Paramedic", "EL8 Paramedic", "EL9 Paramedic"
 ]
 
-async def rank_autocomplete(interaction: discord.Interaction, current: str):
-    current = current.lower()
-    return [c for c in RANK_CHOICES if current in c.name.lower()][:25]
+rank_choices = [app_commands.Choice(name=rank, value=rank) for rank in ranks]
 
-# ——— on_ready ———
+# --- Bot Events ---
 @bot.event
 async def on_ready():
-    print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    try:
-        synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} commands")
-    except Exception as e:
-        print(f"❌ Sync error: {e}")
+    await bot.tree.sync()
+    print(f"Bot connected as {bot.user}")
 
-# ——— /promote ———
-@bot.tree.command(name="promote", description="Promote a Roblox user with cooldown and history.")
+# --- Promote Command ---
+@bot.tree.command(name="promote", description="Promote a Roblox user")
 @app_commands.describe(
     roblox_username="Roblox username",
-    old_rank="Old rank (choose)",
-    new_rank="New rank (choose)",
-    cooldown="Cooldown in hours (0 for none)"
+    old_rank="User's old rank",
+    new_rank="User's new rank",
+    cooldown="Cooldown in hours"
 )
-@app_commands.autocomplete(old_rank=rank_autocomplete, new_rank=rank_autocomplete)
-async def promote(
-    interaction: discord.Interaction,
-    roblox_username: str,
-    old_rank: str,
-    new_rank: str,
-    cooldown: float
-):
+@app_commands.choices(old_rank=rank_choices, new_rank=rank_choices)
+async def promote(interaction: discord.Interaction, roblox_username: str, old_rank: app_commands.Choice[str], new_rank: app_commands.Choice[str], cooldown: float):
+
     now = datetime.datetime.utcnow()
-    now_ts = int(now.timestamp())
+    user = roblox_username.lower()
 
-    # Cooldown check
-    cd = cooldowns_db.get(roblox_username)
-    if cd and now_ts < cd:
-        return await interaction.response.send_message(
-            f"❌ {roblox_username} still on cooldown! Try again <t:{cd}:R>.",
-            ephemeral=True
-        )
+    if user in cooldowns_db:
+        cooldown_end = datetime.datetime.fromtimestamp(cooldowns_db[user])
+        if now < cooldown_end:
+            await interaction.response.send_message(f"❌ {roblox_username} is on cooldown until <t:{int(cooldown_end.timestamp())}:R>.", ephemeral=True)
+            return
 
-    # Update cooldown
+    # Set cooldown
     if cooldown > 0:
-        cooldowns_db[roblox_username] = now_ts + int(cooldown*3600)
+        cooldown_end = now + datetime.timedelta(hours=cooldown)
+        cooldowns_db[user] = int(cooldown_end.timestamp())
     else:
-        cooldowns_db.pop(roblox_username, None)
-    save_json(COOLDOWN_FILE, cooldowns_db)
+        cooldowns_db.pop(user, None)
 
-    # Record promotion
-    user_list = promotions_db.setdefault(roblox_username, [])
-    promo_num = len(user_list) + 1
-    user_list.append({
-        "promotion_number": promo_num,
-        "old_rank": old_rank,
-        "new_rank": new_rank,
+    # Promotion Registration
+    promotions_db.setdefault(user, [])
+    promo_number = len(promotions_db[user]) + 1
+    promotions_db[user].append({
+        "number": promo_number,
+        "old_rank": old_rank.value,
+        "new_rank": new_rank.value,
         "time": now.isoformat()
     })
-    save_json(PROMOTION_FILE, promotions_db)
 
-    # Respond
-    embed = discord.Embed(
-        title=f"✅ Promotion #{promo_num} Recorded!",
-        color=discord.Color.green(),
-        timestamp=now
-    )
-    embed.add_field(name="User",      value=roblox_username, inline=True)
-    embed.add_field(name="Old Rank",  value=old_rank,         inline=True)
-    embed.add_field(name="New Rank",  value=new_rank,         inline=True)
-    embed.add_field(name="Promo #",   value=str(promo_num),   inline=True)
+    save_all()
+
+    # Send embed
+    embed = discord.Embed(title=f"✅ Promotion #{promo_number}", color=discord.Color.green(), timestamp=now)
+    embed.add_field(name="Username", value=roblox_username, inline=True)
+    embed.add_field(name="Old Rank", value=old_rank.value, inline=True)
+    embed.add_field(name="New Rank", value=new_rank.value, inline=True)
     await interaction.response.send_message(embed=embed)
 
-# ——— /promotions ———
-@bot.tree.command(name="promotions", description="Show promotion history for a Roblox user.")
-@app_commands.describe(roblox_username="Roblox username")
-async def promotions(
-    interaction: discord.Interaction,
-    roblox_username: str
-):
-    user_list = promotions_db.get(roblox_username, [])
-    if not user_list:
-        return await interaction.response.send_message(
-            f"No promotions found for **{roblox_username}**.",
-            ephemeral=True
-        )
-
-    embed = discord.Embed(
-        title=f"Promotions for {roblox_username}",
-        color=discord.Color.blue()
-    )
-    for item in user_list:
-        t = datetime.datetime.fromisoformat(item["time"])
-        embed.add_field(
-            name=f"Promotion {item['promotion_number']}",
-            value=f"{item['old_rank']} ➔ {item['new_rank']} at <t:{int(t.timestamp())}:f>",
-            inline=False
-        )
-    await interaction.response.send_message(embed=embed)
-
-# ——— /demote ———
-@bot.tree.command(name="demote", description="Demote by deleting one of a user's promotions.")
+# --- Demote Command ---
+@bot.tree.command(name="demote", description="Demote a Roblox user")
 @app_commands.describe(
     roblox_username="Roblox username",
-    promotion_number="Which promotion number to delete",
-    current_rank="Current rank",
-    demoted_rank="Demoted rank",
+    current_rank="User's current rank",
+    demoted_rank="User's new (lower) rank",
     reason="Reason for demotion"
 )
-@app_commands.autocomplete(current_rank=rank_autocomplete, demoted_rank=rank_autocomplete)
-async def demote(
-    interaction: discord.Interaction,
-    roblox_username: str,
-    promotion_number: int,
-    current_rank: str,
-    demoted_rank: str,
-    reason: str
-):
+@app_commands.choices(current_rank=rank_choices, demoted_rank=rank_choices)
+async def demote(interaction: discord.Interaction, roblox_username: str, current_rank: app_commands.Choice[str], demoted_rank: app_commands.Choice[str], reason: str):
+
     now = datetime.datetime.utcnow()
+    user = roblox_username.lower()
 
-    user_list = promotions_db.get(roblox_username, [])
-    if not user_list:
-        return await interaction.response.send_message(
-            f"No promotions found for **{roblox_username}**.",
-            ephemeral=True
-        )
-
-    found = next((p for p in user_list if p["promotion_number"] == promotion_number), None)
-    if not found:
-        return await interaction.response.send_message(
-            f"❌ Promotion {promotion_number} not found for **{roblox_username}**.",
-            ephemeral=True
-        )
-
-    user_list.remove(found)
-    save_json(PROMOTION_FILE, promotions_db)
-
-    demo_list = demotions_db.setdefault(roblox_username, [])
-    demo_list.append({
-        "promotion_number": promotion_number,
-        "current_rank": current_rank,
-        "demoted_rank": demoted_rank,
+    demotions_db.setdefault(user, [])
+    demo_number = len(demotions_db[user]) + 1
+    demotions_db[user].append({
+        "number": demo_number,
+        "current_rank": current_rank.value,
+        "demoted_rank": demoted_rank.value,
         "reason": reason,
         "time": now.isoformat()
     })
-    save_json(DEMOTION_FILE, demotions_db)
 
-    embed = discord.Embed(
-        title="⚠️ Demotion Executed",
-        color=discord.Color.red(),
-        timestamp=now
-    )
-    embed.add_field(name="User",          value=roblox_username,          inline=True)
-    embed.add_field(name="From Rank",     value=current_rank,             inline=True)
-    embed.add_field(name="To Rank",       value=demoted_rank,             inline=True)
-    embed.add_field(name="Reason",        value=reason,                   inline=False)
-    embed.add_field(name="Deleted Promo", value=str(promotion_number),    inline=False)
+    save_all()
+
+    embed = discord.Embed(title=f"❌ Demotion #{demo_number}", color=discord.Color.red(), timestamp=now)
+    embed.add_field(name="Username", value=roblox_username, inline=True)
+    embed.add_field(name="Current Rank", value=current_rank.value, inline=True)
+    embed.add_field(name="Demoted To", value=demoted_rank.value, inline=True)
+    embed.add_field(name="Reason", value=reason, inline=False)
     await interaction.response.send_message(embed=embed)
 
-# ——— /demotions ———
-@bot.tree.command(name="demotions", description="Show demotion history for a Roblox user.")
+# --- Promotions History ---
+@bot.tree.command(name="promotions", description="View promotions of a user")
 @app_commands.describe(roblox_username="Roblox username")
-async def demotions(
-    interaction: discord.Interaction,
-    roblox_username: str
-):
-    user_list = demotions_db.get(roblox_username, [])
-    if not user_list:
-        return await interaction.response.send_message(
-            f"No demotions found for **{roblox_username}**.",
-            ephemeral=True
-        )
+async def promotions(interaction: discord.Interaction, roblox_username: str):
+    user = roblox_username.lower()
+    promos = promotions_db.get(user, [])
 
-    embed = discord.Embed(
-        title=f"Demotions for {roblox_username}",
-        color=discord.Color.dark_red()
-    )
-    for item in user_list:
-        t = datetime.datetime.fromisoformat(item["time"])
-        embed.add_field(
-            name=f"Demotion of Promo #{item['promotion_number']}",
-            value=(
-                f"{item['current_rank']} ➔ {item['demoted_rank']}\n"
-                f"Reason: {item['reason']}\n"
-                f"At <t:{int(t.timestamp())}:f>"
-            ),
-            inline=False
-        )
+    if not promos:
+        await interaction.response.send_message(f"❌ No promotions found for {roblox_username}.", ephemeral=True)
+        return
+
+    embed = discord.Embed(title=f"Promotions of {roblox_username}", color=discord.Color.blue())
+    for p in promos:
+        time = datetime.datetime.fromisoformat(p["time"])
+        embed.add_field(name=f"Promotion #{p['number']}", value=f"{p['old_rank']} ➔ {p['new_rank']} at <t:{int(time.timestamp())}:f>", inline=False)
+
     await interaction.response.send_message(embed=embed)
 
-# ——— /help ———
-@bot.tree.command(name="help", description="List all available commands.")
-async def help_cmd(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="📖 Command List",
-        color=discord.Color.teal()
-    )
-    embed.add_field(name="/promote",    value="Promote a user with ranks & cooldown.",           inline=False)
-    embed.add_field(name="/promotions", value="View a user's promotion history.",                 inline=False)
-    embed.add_field(name="/demote",     value="Delete one promotion and record a demotion.",     inline=False)
-    embed.add_field(name="/demotions",  value="View a user's demotion history.",                 inline=False)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+# --- Demotions History ---
+@bot.tree.command(name="demotions", description="View demotions of a user")
+@app_commands.describe(roblox_username="Roblox username")
+async def demotions(interaction: discord.Interaction, roblox_username: str):
+    user = roblox_username.lower()
+    demos = demotions_db.get(user, [])
 
-# ——— Run the bot ———
+    if not demos:
+        await interaction.response.send_message(f"❌ No demotions found for {roblox_username}.", ephemeral=True)
+        return
+
+    embed = discord.Embed(title=f"Demotions of {roblox_username}", color=discord.Color.purple())
+    for d in demos:
+        time = datetime.datetime.fromisoformat(d["time"])
+        embed.add_field(name=f"Demotion #{d['number']}", value=f"{d['current_rank']} ➔ {d['demoted_rank']} | Reason: {d['reason']} at <t:{int(time.timestamp())}:f>", inline=False)
+
+    await interaction.response.send_message(embed=embed)
+
+# --- Delete Promotion by Number ---
+@bot.tree.command(name="delete_promotion", description="Delete a promotion record")
+@app_commands.describe(
+    roblox_username="Roblox username",
+    promotion_number="Promotion number to delete"
+)
+async def delete_promotion(interaction: discord.Interaction, roblox_username: str, promotion_number: int):
+    user = roblox_username.lower()
+    promos = promotions_db.get(user, [])
+
+    promo = next((p for p in promos if p["number"] == promotion_number), None)
+    if not promo:
+        await interaction.response.send_message(f"❌ Promotion #{promotion_number} not found for {roblox_username}.", ephemeral=True)
+        return
+
+    promotions_db[user].remove(promo)
+    save_all()
+
+    embed = discord.Embed(
+        title="✅ Promotion Deleted",
+        description=f"Promotion #{promotion_number} for {roblox_username} has been deleted.",
+        color=discord.Color.orange()
+    )
+    await interaction.response.send_message(embed=embed)
+
+# --- Run the Bot ---
 bot.run(os.getenv("DISCORD_TOKEN"))
