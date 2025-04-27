@@ -1,0 +1,41 @@
+import discord
+from discord.ext import commands
+import os
+import threading
+from flask import Flask
+
+# Flask app to keep Render active
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_web():
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+
+threading.Thread(target=run_web).start()
+
+# Discord bot setup
+intents = discord.Intents.default()
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    try:
+        await bot.tree.sync()
+        print("Commands synced!")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
+
+async def load_cogs():
+    await bot.load_extension("promote")  # Assuming you saved promote.py in the same folder
+
+bot.loop.create_task(load_cogs())
+
+# Run the bot
+bot.run(os.getenv("DISCORD_TOKEN"))
