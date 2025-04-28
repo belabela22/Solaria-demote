@@ -206,8 +206,8 @@ async def demote(interaction: discord.Interaction, roblox_username: str, promoti
         timestamp=now
     )
     embed.add_field(name="Username", value=roblox_username, inline=True)
-    embed.add_field(name="From Rank", value=current_full, inline=True)
-    embed.add_field(name="To Rank", value=demoted_full, inline=True)
+    embed.add_field(name="To Rank", value=current_full, inline=True)
+    embed.add_field(name="From Rank", value=demoted_full, inline=True)
     embed.add_field(name="Reason", value=reason, inline=False)
     await interaction.response.send_message(embed=embed)
 
