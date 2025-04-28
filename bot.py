@@ -228,7 +228,7 @@ async def demotions(interaction: discord.Interaction, roblox_username: str):
         t = datetime.datetime.fromisoformat(demo["time"])
         embed.add_field(
             name=f"Demotion (from Promo #{demo['promotion_number']})",
-            value=(f"{demo['current_rank']} ➔ {demo['demoted_rank']}\n"
+            value=(f"{demo['demoted_rank']} ➔ {demo['current_rank']}\n"
                    f"Reason: {demo['reason']}\n"
                    f"At <t:{int(t.timestamp())}:f>"),
             inline=False
