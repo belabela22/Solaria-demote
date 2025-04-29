@@ -24,6 +24,7 @@ threading.Thread(target=run_web).start()
 PROMOTION_FILE = "promotions.json"
 DEMOTION_FILE  = "demotions.json"
 COOLDOWN_FILE  = "cooldowns.json"
+STAFF_FILE = "staff.json"  # New staff file
 
 # --- JSON helpers ---
 def load_json(path, default):
@@ -40,11 +41,13 @@ def save_json(path, data):
 promotions_db = load_json(PROMOTION_FILE, {})
 demotions_db = load_json(DEMOTION_FILE, {})
 cooldowns_db = load_json(COOLDOWN_FILE, {})
+staff_db = load_json(STAFF_FILE, {})  # Load staff database
 
 def save_all():
     save_json(PROMOTION_FILE, promotions_db)
     save_json(DEMOTION_FILE, demotions_db)
     save_json(COOLDOWN_FILE, cooldowns_db)
+    save_json(STAFF_FILE, staff_db)  # Save staff database
 
 # --- Bot Setup ---
 intents = discord.Intents.default()
@@ -71,51 +74,73 @@ async def on_ready():
         print(f"❌ Sync error: {e}")
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
 
+# --- /createfile Command ---
+@bot.tree.command(name="createfile", description="Create a staff record with their information.")
+@app_commands.describe(
+    real_name="Real name of the staff member",
+    roblox_username="Roblox username of the staff member",
+    current_rank="Current rank of the staff member",
+    current_department="Current department of the staff member"
+)
+@app_commands.choices(current_rank=RANK_OPTIONS, current_department=DEPARTMENT_OPTIONS)
+async def createfile(interaction: discord.Interaction, real_name: str, roblox_username: str,
+                     current_rank: app_commands.Choice[str], current_department: app_commands.Choice[str]):
+    user = roblox_username.lower()
+
+    if user in staff_db:
+        await interaction.response.send_message(f"❌ Staff record already exists for {roblox_username}.", ephemeral=True)
+        return
+
+    staff_db[user] = {
+        "real_name": real_name,
+        "roblox_username": roblox_username,
+        "current_rank": current_rank.value,
+        "current_department": current_department.value
+    }
+    save_json(STAFF_FILE, staff_db)
+
+    await interaction.response.send_message(f"✅ Staff record created for {roblox_username}.", ephemeral=True)
+
 # --- /promote Command ---
 @bot.tree.command(name="promote", description="Promote a Roblox user (separate rank & department).")
 @app_commands.describe(
     roblox_username="Roblox username",
-    old_rank="Select the old rank",
-    old_department="Select the old department",
     new_rank="Select the new rank",
-    new_department="Select the new department",
-    cooldown="Cooldown in hours (0 for none)"
+    new_department="Select the new department (optional)"
 )
-@app_commands.choices(old_rank=RANK_OPTIONS, new_rank=RANK_OPTIONS, old_department=DEPARTMENT_OPTIONS, new_department=DEPARTMENT_OPTIONS)
-async def promote(interaction: discord.Interaction, roblox_username: str, 
-                  old_rank: app_commands.Choice[str], old_department: app_commands.Choice[str],
-                  new_rank: app_commands.Choice[str], new_department: app_commands.Choice[str],
-                  cooldown: float):
-    now = datetime.datetime.utcnow()
-    now_ts = int(now.timestamp())
+@app_commands.choices(new_rank=RANK_OPTIONS, new_department=DEPARTMENT_OPTIONS)
+async def promote(interaction: discord.Interaction, roblox_username: str,
+                  new_rank: app_commands.Choice[str], new_department: app_commands.Choice[str] = None):
     user = roblox_username.lower()
 
-    # Check cooldown
-    if user in cooldowns_db and now_ts < cooldowns_db[user]:
-        await interaction.response.send_message(
-            f"❌ {roblox_username} is on cooldown until <t:{cooldowns_db[user]}:R>.",
-            ephemeral=True
-        )
+    if user not in staff_db:
+        await interaction.response.send_message(f"❌ No staff record found for {roblox_username}.", ephemeral=True)
         return
 
-    # Set cooldown
-    if cooldown > 0:
-        cooldowns_db[user] = now_ts + int(cooldown * 3600)
+    # Load old rank and department
+    old_rank = staff_db[user]["current_rank"]
+    old_department = staff_db[user]["current_department"]
+
+    # Set new rank and department
+    if new_department:
+        staff_db[user]["current_rank"] = new_rank.value
+        staff_db[user]["current_department"] = new_department.value
     else:
-        cooldowns_db.pop(user, None)
-    save_json(COOLDOWN_FILE, cooldowns_db)
+        staff_db[user]["current_rank"] = new_rank.value
+        staff_db[user]["current_department"] = old_department  # Keep old department if not updated
 
-    old_full = f"{old_rank.value} {old_department.value}"
-    new_full = f"{new_rank.value} {new_department.value}"
+    save_json(STAFF_FILE, staff_db)
+
+    # Record promotion in promotions DB
+    now = datetime.datetime.utcnow()
+    now_ts = int(now.timestamp())
     approver = interaction.user.name
-
-    # Record promotion
     user_promos = promotions_db.setdefault(user, [])
     promo_number = len(user_promos) + 1
     user_promos.append({
         "promotion_number": promo_number,
-        "old_rank": old_full,
-        "new_rank": new_full,
+        "old_rank": f"{old_rank} {old_department}",
+        "new_rank": f"{new_rank.value} {staff_db[user]['current_department']}",
         "approved_by": approver,
         "time": now.isoformat()
     })
@@ -127,8 +152,8 @@ async def promote(interaction: discord.Interaction, roblox_username: str,
         timestamp=now
     )
     embed.add_field(name="Username", value=roblox_username, inline=True)
-    embed.add_field(name="Old Rank", value=old_full, inline=True)
-    embed.add_field(name="New Rank", value=new_full, inline=True)
+    embed.add_field(name="Old Rank", value=f"{old_rank} {old_department}", inline=True)
+    embed.add_field(name="New Rank", value=f"{new_rank.value} {staff_db[user]['current_department']}", inline=True)
     embed.add_field(name="Approved By", value=approver, inline=True)
     await interaction.response.send_message(embed=embed)
 
@@ -206,44 +231,12 @@ async def demote(interaction: discord.Interaction, roblox_username: str, promoti
         timestamp=now
     )
     embed.add_field(name="Username", value=roblox_username, inline=True)
-    embed.add_field(name="To Rank", value=current_full, inline=True)
-    embed.add_field(name="From Rank", value=demoted_full, inline=True)
-    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.add_field(name="From Rank", value=current_full, inline=True)
+    embed.add_field(name="To Rank", value=demoted_full, inline=True)
+    embed.add_field(name="Reason", value=reason, inline=True)
+    embed.add_field(name="Time", value=f"<t:{int(now.timestamp())}:f>", inline=True)
+
     await interaction.response.send_message(embed=embed)
 
-# --- /demotions Command ---
-@bot.tree.command(name="demotions", description="View demotion history for a Roblox user.")
-@app_commands.describe(roblox_username="Roblox username")
-async def demotions(interaction: discord.Interaction, roblox_username: str):
-    user = roblox_username.lower()
-    demos = demotions_db.get(user, [])
-    if not demos:
-        return await interaction.response.send_message(f"❌ No demotions found for {roblox_username}.", ephemeral=True)
-    
-    embed = discord.Embed(
-        title=f"Demotions for {roblox_username}",
-        color=discord.Color.dark_red()
-    )
-    for demo in demos:
-        t = datetime.datetime.fromisoformat(demo["time"])
-        embed.add_field(
-            name=f"Demotion (from Promo #{demo['promotion_number']})",
-            value=(f"{demo['demoted_rank']} ➔ {demo['current_rank']}\n"
-                   f"Reason: {demo['reason']}\n"
-                   f"At <t:{int(t.timestamp())}:f>"),
-            inline=False
-        )
-    await interaction.response.send_message(embed=embed)
-
-# --- /help Command ---
-@bot.tree.command(name="help", description="List all commands.")
-async def help_cmd(interaction: discord.Interaction):
-    embed = discord.Embed(title="📖 Bot Command List", color=discord.Color.teal())
-    embed.add_field(name="/promote", value="Promote a user with rank & department.", inline=False)
-    embed.add_field(name="/promotions", value="View user's promotions.", inline=False)
-    embed.add_field(name="/demote", value="Demote user and record it.", inline=False)
-    embed.add_field(name="/demotions", value="View user's demotions.", inline=False)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-# --- Run the Bot ---
-bot.run(os.getenv("DISCORD_TOKEN"))
+# --- Run the bot ---
+bot.run("YOUR_DISCORD_BOT_TOKEN")
